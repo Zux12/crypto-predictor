@@ -40,3 +40,21 @@ app.listen(PORT, () => {
     .then(() => console.log("✅ MongoDB connected"))
     .catch(err => console.error("❌ MongoDB connection error:", err.message));
 });
+
+import Heartbeat from "./models/Heartbeat.js";
+
+app.get("/api/ping-db", async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ ok:false, error:"Mongo not connected" });
+    const doc = await Heartbeat.create({ note: "hello from heroku" });
+    res.json({ ok:true, id: doc._id.toString(), at: doc.ts });
+  } catch (e) { res.status(500).json({ ok:false, error: e.message }); }
+});
+
+app.get("/api/heartbeats", async (_req, res) => {
+  try {
+    const rows = await Heartbeat.find().sort({ ts:-1 }).limit(5).lean();
+    res.json({ ok:true, rows });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
