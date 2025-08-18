@@ -93,3 +93,51 @@ app.get("/api/predictions/latest", async (req, res) => {
     res.json({ ok:true, results });
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
+
+import Label from "./models/Label.js";
+
+app.get("/api/scores/summary", async (req, res) => {
+  try {
+    const days = Math.max(1, parseInt(req.query.days || "7", 10)); // last 7 days by default
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const pipe = [
+      { $match: { pred_ts: { $gte: since } } },
+      { $group: {
+          _id: "$coin",
+          n: { $sum: 1 },
+          acc: { $avg: { $cond: ["$correct", 1, 0] } },
+          brier: { $avg: "$brier" }
+      }},
+      { $project: {
+          _id: 0, coin: "$_id",
+          n: 1,
+          accuracy: { $round: ["$acc", 4] },
+          brier: { $round: ["$brier", 6] }
+      }},
+      { $sort: { coin: 1 } }
+    ];
+
+    const byCoin = await Label.aggregate(pipe);
+    const overallAgg = await Label.aggregate([
+      { $match: { pred_ts: { $gte: since } } },
+      { $group: {
+          _id: null,
+          n: { $sum: 1 },
+          acc: { $avg: { $cond: ["$correct", 1, 0] } },
+          brier: { $avg: "$brier" }
+      }},
+      { $project: {
+          _id: 0,
+          n: 1,
+          accuracy: { $round: ["$acc", 4] },
+          brier: { $round: ["$brier", 6] }
+      }}
+    ]);
+
+    res.json({ ok: true, window_days: days, overall: overallAgg[0] || null, byCoin });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
