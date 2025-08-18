@@ -27,14 +27,24 @@ async function load(){
     return `<div class="row"><span>${c}</span><strong>$${fmt(row?.price, 2)}</strong></div>`;
   }).join("");
 
-  // Predictions
-  const prDiv = document.getElementById("preds");
-  prDiv.innerHTML = coins.map(c=>{
-    const row = preds.results?.[c];
-    const p = row?.p_up;
-    const t = row?.ts ? new Date(row.ts).toLocaleString() : "—";
-    return `<div class="row"><span>${c}</span><span>${pill(p)} <span class="muted" style="margin-left:8px">${t}</span></span></div>`;
-  }).join("");
+// Predictions (with model_ver)
+const prDiv = document.getElementById("preds");
+prDiv.innerHTML = coins.map(c=>{
+  const row = preds.results?.[c];
+  const p = row?.p_up;
+  const t = row?.ts ? new Date(row.ts).toLocaleString() : "—";
+  const model = row?.model_ver || "—";
+  return `
+    <div class="row">
+      <span>${c}</span>
+      <span>
+        ${pill(p)}
+        <span class="muted" style="margin-left:8px">${t}</span>
+        <span class="muted" style="margin-left:8px">(${model})</span>
+      </span>
+    </div>`;
+}).join("");
+
 
   // Scores
   const sDiv = document.getElementById("scores");
