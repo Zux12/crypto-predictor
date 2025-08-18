@@ -226,3 +226,8 @@ async function loadMonitoring(){
 load();
 setInterval(load, 30_000);
 
+const __origLoad = load;
+load = async function(){
+  await __origLoad();
+  await loadMonitoring();
+};
