@@ -178,3 +178,141 @@ app.get("/api/paper/equity", async (req, res) => {
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
+// --- Monitoring APIs ---
+// 1) Calibration: bucket predictions by p_up and compare average predicted prob vs. realized frequency
+app.get("/api/scores/calibration", async (req, res) => {
+  try {
+    const days = Math.max(1, parseInt(req.query.days || "30", 10));
+    const bins = Math.min(50, Math.max(5, parseInt(req.query.bins || "10", 10)));
+    const coin = (req.query.coin || "all").toLowerCase();
+    const since = new Date(Date.now() - days*24*60*60*1000);
+
+    const match = { pred_ts: { $gte: since } };
+    if (coin !== "all") match.coin = coin;
+
+    // place predictions into equal-probability-width bins
+    const pipe = [
+      { $match: match },
+      { $project: {
+          coin: 1,
+          p_up: 1,
+          label_up: 1
+      }},
+      { $addFields: {
+          bin: {
+            $let: {
+              vars: { b: { $floor: { $multiply: ["$p_up", bins] } } },
+              in: { $min: [ { $max: [ "$$b", 0 ] }, bins - 1 ] }
+            }
+          }
+      }},
+      { $group: {
+          _id: "$bin",
+          n: { $sum: 1 },
+          avg_pred: { $avg: "$p_up" },
+          avg_real: { $avg: { $cond: ["$label_up", 1, 0] } }
+      }},
+      { $project: {
+          _id: 0,
+          bin: "$_id",
+          n: 1,
+          avg_pred: { $round: ["$avg_pred", 4] },
+          avg_real: { $round: ["$avg_real", 4] }
+      }},
+      { $sort: { bin: 1 } }
+    ];
+
+    const rows = await Label.aggregate(pipe);
+    res.json({ ok: true, bins, days, coin, rows });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: e.message });
+  }
+});
+
+// 2) Accuracy trend bucketed by day/hour
+app.get("/api/scores/accuracy_trend", async (req, res) => {
+  try {
+    const days = Math.max(1, parseInt(req.query.days || "30", 10));
+    const bucket = (req.query.bucket || "day").toLowerCase(); // "day" or "hour"
+    const coin = (req.query.coin || "all").toLowerCase();
+    const since = new Date(Date.now() - days*24*60*60*1000);
+
+    const match = { pred_ts: { $gte: since } };
+    if (coin !== "all") match.coin = coin;
+
+    const dateFields = bucket === "hour"
+      ? { y: { $year: "$pred_ts" }, m: { $month: "$pred_ts" }, d: { $dayOfMonth: "$pred_ts" }, h: { $hour: "$pred_ts" } }
+      : { y: { $year: "$pred_ts" }, m: { $month: "$pred_ts" }, d: { $dayOfMonth: "$pred_ts" } };
+
+    const groupId = bucket === "hour"
+      ? { y: "$y", m: "$m", d: "$d", h: "$h" }
+      : { y: "$y", m: "$m", d: "$d" };
+
+    const pipe = [
+      { $match: match },
+      { $addFields: dateFields },
+      { $group: {
+          _id: groupId,
+          n: { $sum: 1 },
+          acc: { $avg: { $cond: ["$correct", 1, 0] } }
+      }},
+      { $project: {
+          _id: 0,
+          y: "$_id.y", m: "$_id.m", d: "$_id.d",
+          h: bucket === "hour" ? "$_id.h" : null,
+          n: 1,
+          accuracy: { $round: ["$acc", 4] }
+      }},
+      { $sort: { y:1, m:1, d:1, h:1 } }
+    ];
+
+    const rows = await Label.aggregate(pipe);
+    res.json({ ok: true, days, bucket, coin, rows });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: e.message });
+  }
+});
+
+// 3) Brier trend bucketed by day/hour
+app.get("/api/scores/brier_trend", async (req, res) => {
+  try {
+    const days = Math.max(1, parseInt(req.query.days || "30", 10));
+    const bucket = (req.query.bucket || "day").toLowerCase();
+    const coin = (req.query.coin || "all").toLowerCase();
+    const since = new Date(Date.now() - days*24*60*60*1000);
+
+    const match = { pred_ts: { $gte: since } };
+    if (coin !== "all") match.coin = coin;
+
+    const dateFields = bucket === "hour"
+      ? { y: { $year: "$pred_ts" }, m: { $month: "$pred_ts" }, d: { $dayOfMonth: "$pred_ts" }, h: { $hour: "$pred_ts" } }
+      : { y: { $year: "$pred_ts" }, m: { $month: "$pred_ts" }, d: { $dayOfMonth: "$pred_ts" } };
+
+    const groupId = bucket === "hour"
+      ? { y: "$y", m: "$m", d: "$d", h: "$h" }
+      : { y: "$y", m: "$m", d: "$d" };
+
+    const pipe = [
+      { $match: match },
+      { $addFields: dateFields },
+      { $group: {
+          _id: groupId,
+          n: { $sum: 1 },
+          brier: { $avg: "$brier" }
+      }},
+      { $project: {
+          _id: 0,
+          y: "$_id.y", m: "$_id.m", d: "$_id.d",
+          h: bucket === "hour" ? "$_id.h" : null,
+          n: 1,
+          brier: { $round: ["$brier", 6] }
+      }},
+      { $sort: { y:1, m:1, d:1, h:1 } }
+    ];
+
+    const rows = await Label.aggregate(pipe);
+    res.json({ ok: true, days, bucket, coin, rows });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: e.message });
+  }
+});
