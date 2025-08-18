@@ -3,24 +3,55 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Crypto Predictor • Boot Check</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <title>Crypto Predictor • Dashboard</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; 
-           background:#0f172a; color:#e5e7eb; margin:0; display:flex; min-height:100vh; 
-           align-items:center; justify-content:center; }
-    .card { background:#111827; padding:28px; border-radius:16px; max-width:680px; box-shadow:0 10px 25px rgba(0,0,0,.35); }
-    .muted { color:#9ca3af; font-size:14px }
-    code { background:#0b1220; padding:2px 6px; border-radius:6px }
-    a { color:#93c5fd; text-decoration:none }
+    :root{ --bg:#0f172a; --card:#111827; --muted:#9ca3af; --text:#e5e7eb; --good:#22c55e; --bad:#ef4444; }
+    *{ box-sizing:border-box }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap{ max-width: 980px; margin: 24px auto; padding: 0 16px; }
+    .grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap:16px; }
+    .card{ background:var(--card); border-radius:16px; padding:18px; box-shadow:0 10px 25px rgba(0,0,0,.35); }
+    h1{ margin:0 0 12px 0; font-size:24px; }
+    h2{ margin:0 0 12px 0; font-size:18px; }
+    .muted{ color:var(--muted); font-size:14px; }
+    .row{ display:flex; align-items:center; justify-content:space-between; margin:8px 0; }
+    .pill{ padding:2px 8px; border-radius:999px; font-variant-numeric: tabular-nums; }
+    .pill.good{ background:rgba(34,197,94,.15); color: var(--good); }
+    .pill.bad{ background:rgba(239,68,68,.15); color: var(--bad); }
+    .btn{ background:#1f2937; color:#d1d5db; border:1px solid #374151; border-radius:10px; padding:8px 12px; cursor:pointer; }
+    .btn:disabled{ opacity:.6; cursor:not-allowed; }
+    code{ background:#0b1220; padding:2px 6px; border-radius:6px }
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="wrap">
     <h1>🚀 Crypto Predictor</h1>
-    <p>This is the initial dashboard shell. If the app deployed correctly, the health endpoint below should respond.</p>
-    <p class="muted">Try: <a href="/health" target="_blank">/health</a></p>
-    <p class="muted">Env expected on Heroku: <code>MONGO_URI</code>, <code>JWT_SECRET</code>, <code>TIMEZONE</code></p>
+    <p class="muted">Live prices, latest predictions, and rolling scores (auto-refreshes every 30s).</p>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Prices (USD)</h2>
+        <div id="prices">Loading…</div>
+      </div>
+
+      <div class="card">
+        <h2>Predictions (P↑ in 24h)</h2>
+        <div id="preds">Loading…</div>
+      </div>
+
+      <div class="card">
+        <h2>Scores (last 7 days)</h2>
+        <div id="scores">Waiting for first 24h to mature…</div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <button id="refresh" class="btn">Refresh now</button>
+      <span class="muted" id="last-upd"></span>
+      <span class="muted" style="float:right">Endpoints: <code>/api/prices/latest</code> • <code>/api/predictions/latest</code> • <code>/api/scores/summary</code></span>
+    </div>
   </div>
+
+  <script src="/app.js"></script>
 </body>
 </html>
