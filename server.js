@@ -1,5 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
+import Price from "./models/Price.js";
+
 
 // Heroku provides env vars automatically.
 // Locally, create a .env with MONGO_URI, JWT_SECRET, TIMEZONE.
@@ -58,3 +60,20 @@ app.get("/api/heartbeats", async (_req, res) => {
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
+app.get("/api/prices/latest", async (req, res) => {
+  try {
+    const coins = (req.query.coins || "bitcoin,ethereum")
+      .split(",")
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    const results = {};
+    for (const c of coins) {
+      const row = await Price.findOne({ coin: c }).sort({ ts: -1 }).lean();
+      if (row) results[c] = row;
+    }
+    res.json({ ok: true, results });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
