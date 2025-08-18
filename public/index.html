@@ -28,22 +28,36 @@
     <h1>🚀 Crypto Predictor</h1>
     <p class="muted">Live prices, latest predictions, and rolling scores (auto-refreshes every 30s).</p>
 
-    <div class="grid">
-      <div class="card">
-        <h2>Prices (USD)</h2>
-        <div id="prices">Loading…</div>
-      </div>
+   <div class="grid">
+  <div class="card">
+    <h2>Prices (USD)</h2>
+    <div id="prices">Loading…</div>
+  </div>
 
-      <div class="card">
-        <h2>Predictions (P↑ in 24h)</h2>
-        <div id="preds">Loading…</div>
-      </div>
+  <div class="card">
+    <h2>Predictions (P↑ in 24h)</h2>
+    <div id="preds">Loading…</div>
+  </div>
 
-      <div class="card">
-        <h2>Scores (last 7 days)</h2>
-        <div id="scores">Waiting for first 24h to mature…</div>
-      </div>
-    </div>
+  <div class="card">
+    <h2>Scores (last 7 days)</h2>
+    <div id="scores">Waiting for first 24h to mature…</div>
+  </div>
+
+  <!-- NEW: Equity -->
+  <div class="card">
+    <h2>Paper Trading — Equity</h2>
+    <div id="equity-summary" class="muted">Loading…</div>
+    <div id="equity-chart" style="margin-top:8px; width:100%; height:100px;"></div>
+  </div>
+
+  <!-- NEW: Recent trades -->
+  <div class="card">
+    <h2>Recent Trades</h2>
+    <div id="trades">Loading…</div>
+  </div>
+</div>
+
 
     <div style="margin-top:16px">
       <button id="refresh" class="btn">Refresh now</button>
