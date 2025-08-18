@@ -97,31 +97,55 @@ function scoreToProb(f) {
 
 async function makePredictionForCoin(coin) {
   const closes = await loadCloses(coin, 240); // ~40 hours at 10-min cadence
-  if (!closes || closes.length < 25) return null;
 
-  const f = buildFeatures(closes);
-  if (!f) return null;
+  // If we have at least 2 prices, we can do a simple v1 fallback
+  const canFallback = closes && closes.length >= 2;
 
-  const { p_up, raw_score } = scoreToProb(f);
+  // Try v2 features first
+  if (closes && closes.length >= 25) {
+    const f = buildFeatures(closes);
+    if (f) {
+      const { p_up, raw_score } = scoreToProb(f);
+      const doc = await Prediction.create({
+        coin,
+        horizon: "24h",
+        p_up,
+        features: {
+          r1: f.r1,
+          ema5: f.ema5,
+          ema20: f.ema20,
+          ema_cross: f.ema_cross,
+          rsi14: f.rsi14,
+          vol2h: f.vol2h,
+          raw_score
+        },
+        model_ver: "v2-ema-rsi"
+      });
+      return { coin, p_up: doc.p_up, features: doc.features };
+    }
+  }
 
-  const doc = await Prediction.create({
-    coin,
-    horizon: "24h",
-    p_up,
-    features: {
-      r1: f.r1,
-      ema5: f.ema5,
-      ema20: f.ema20,
-      ema_cross: f.ema_cross,
-      rsi14: f.rsi14,
-      vol2h: f.vol2h,
-      raw_score
-    },
-    model_ver: "v2-ema-rsi"
-  });
+  // ---- Fallback (v1 momentum) while we build history ----
+  if (canFallback) {
+    const last = closes[closes.length - 1];
+    const prev = closes[closes.length - 2];
+    const r1 = (last - prev) / prev;
+    const p_up = +sigmoid(r1 * 150).toFixed(4);
 
-  return { coin, p_up: doc.p_up, features: doc.features };
+    const doc = await Prediction.create({
+      coin,
+      horizon: "24h",
+      p_up,
+      features: { r1 },
+      model_ver: "v1-fallback"
+    });
+    return { coin, p_up: doc.p_up, features: doc.features };
+  }
+
+  // Not enough data to do anything
+  return null;
 }
+
 
 (async () => {
   try {
