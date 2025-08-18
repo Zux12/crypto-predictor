@@ -138,6 +138,89 @@ load = async function(){
   await loadPaper();
 };
 
+// --- Monitoring client helpers ---
+function svgBarChart(pairs, width=600, height=120, pad=6){
+  // pairs: [{xLabel, pred, real, n}]
+  if (!pairs?.length) return '<div class="muted">No data</div>';
+  const w = width, h = height;
+  const barW = (w - pad*2) / pairs.length;
+  let maxY = 1; // probs in [0,1]
+  const y = v => h - pad - v * (h - pad*2);
+  const barsPred = pairs.map((p,i)=>{
+    const x = pad + i*barW + barW*0.15;
+    const bh = (h - pad*2) * p.pred;
+    return `<rect x="${x}" y="${y(p.pred)}" width="${barW*0.3}" height="${bh}" fill="currentColor" opacity="0.7">
+      <title>bin ${p.xLabel} • pred ${p.pred.toFixed(2)} • n=${p.n}</title></rect>`;
+  }).join("");
+  const barsReal = pairs.map((p,i)=>{
+    const x = pad + i*barW + barW*0.55;
+    const bh = (h - pad*2) * p.real;
+    return `<rect x="${x}" y="${y(p.real)}" width="${barW*0.3}" height="${bh}" fill="currentColor" opacity="0.35">
+      <title>bin ${p.xLabel} • real ${p.real.toFixed(2)} • n=${p.n}</title></rect>`;
+  }).join("");
+  const xLabels = pairs.map((p,i)=>{
+    const x = pad + i*barW + barW/2;
+    return `<text x="${x}" y="${h-2}" font-size="10" text-anchor="middle" fill="#9ca3af">${p.xLabel}</text>`;
+  }).join("");
+
+  // diagonal reference line (perfect calibration)
+  const line = `<line x1="${pad}" y1="${y(0)}" x2="${w-pad}" y2="${y(1)}" stroke="#64748b" stroke-dasharray="4 4"/>`;
+
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}">
+    ${line}${barsPred}${barsReal}${xLabels}
+  </svg>
+  <div class="muted" style="margin-top:6px">Dark bars = predicted, light bars = realized. Hover for counts.</div>`;
+}
+
+function toISOrow(r){
+  const mm = String(r.m).padStart(2,"0"); const dd = String(r.d).padStart(2,"0");
+  const hh = r.h==null ? "" : " " + String(r.h).padStart(2,"0") + ":00";
+  return `${r.y}-${mm}-${dd}${hh}`;
+}
+
+function svgLine(points, width=600, height=120, pad=6){
+  if (!points?.length) return '<div class="muted">No data</div>';
+  const vals = points.map(p=>p.v);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = (max - min) || 1;
+  const stepX = (width - pad*2) / (points.length - 1);
+  const y = v => height - pad - ((v - min) / span) * (height - pad*2);
+  const poly = points.map((p,i)=>`${pad + i*stepX},${y(p.v)}`).join(' ');
+  const dots = points.map((p,i)=>`<circle cx="${pad + i*stepX}" cy="${y(p.v)}" r="2">
+    <title>${p.t} • ${p.v.toFixed(3)} (${p.n} labels)</title></circle>`).join("");
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}">
+    <polyline fill="none" stroke="currentColor" stroke-width="2" points="${poly}" />
+    ${dots}
+  </svg>`;
+}
+
+async function loadMonitoring(){
+  // calibration (30d, 10 bins, all coins)
+  const calib = await fetchJSON(`/api/scores/calibration?days=30&bins=10&coin=all`).catch(()=>({ok:false}));
+  const calibDiv = document.getElementById("calibration");
+  if (calib?.ok && calib.rows?.length){
+    // build pairs for chart
+    const pairs = calib.rows.map(r=>{
+      const lo = (r.bin / calib.bins).toFixed(2);
+      const hi = ((r.bin+1) / calib.bins).toFixed(2);
+      return { xLabel: `${lo}-${hi}`, pred: r.avg_pred, real: r.avg_real, n: r.n };
+    });
+    calibDiv.innerHTML = svgBarChart(pairs, 600, 120);
+  } else {
+    calibDiv.textContent = "Waiting for labels…";
+  }
+
+  // accuracy trend (30d by day, all coins)
+  const acc = await fetchJSON(`/api/scores/accuracy_trend?days=30&bucket=day&coin=all`).catch(()=>({ok:false}));
+  const accDiv = document.getElementById("acc-trend");
+  if (acc?.ok && acc.rows?.length){
+    const pts = acc.rows.map(r=>({ t: toISOrow(r), v: r.accuracy, n: r.n }));
+    accDiv.innerHTML = svgLine(pts, 600, 120);
+  } else {
+    accDiv.textContent = "Waiting for labels…";
+  }
+}
+
 
 // auto-refresh every 30s
 load();
