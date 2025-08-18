@@ -1,6 +1,8 @@
 import express from "express";
 import mongoose from "mongoose";
 import Price from "./models/Price.js";
+import Prediction from "./models/Prediction.js";
+
 
 
 // Heroku provides env vars automatically.
