@@ -2,6 +2,9 @@ import express from "express";
 import mongoose from "mongoose";
 import Price from "./models/Price.js";
 import Prediction from "./models/Prediction.js";
+import PaperState from "./models/PaperState.js";
+import PaperTrade from "./models/PaperTrade.js";
+import Equity from "./models/Equity.js";
 
 
 
@@ -139,5 +142,39 @@ app.get("/api/scores/summary", async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+
+app.get("/api/paper/summary", async (_req, res) => {
+  try {
+    const s = await PaperState.findById("default").lean();
+    if (!s) return res.json({ ok: true, state: null });
+    res.json({
+      ok: true,
+      state: {
+        cash_usd: s.cash_usd,
+        equity_usd: s.equity_usd,
+        holdings: s.holdings,
+        params: s.params,
+        updated_at: s.updated_at
+      }
+    });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+app.get("/api/paper/trades", async (req, res) => {
+  try {
+    const limit = Math.min(200, parseInt(req.query.limit || "50", 10));
+    const rows = await PaperTrade.find().sort({ ts: -1 }).limit(limit).lean();
+    res.json({ ok:true, rows });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+app.get("/api/paper/equity", async (req, res) => {
+  try {
+    const limit = Math.min(1000, parseInt(req.query.limit || "200", 10));
+    const rows = await Equity.find().sort({ ts: -1 }).limit(limit).lean();
+    res.json({ ok:true, rows: rows.reverse() }); // chronological
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
