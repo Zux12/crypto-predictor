@@ -418,9 +418,6 @@ app.get("/api/debug/matured", async (req, res) => {
   }
 });
 
-import PaperState from "./models/PaperState.js";
-import PaperTrade from "./models/PaperTrade.js";
-
 app.get("/api/paper/pnl", async (_req, res) => {
   try {
     const s = await PaperState.findById("default").lean();
