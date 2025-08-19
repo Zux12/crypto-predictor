@@ -130,27 +130,34 @@ function buildFeatures(closes) {
 
 // ---------- scoring ----------
 function scoreToProb(f, debug = false) {
-  // weights (conservative to avoid extremes)
+  // gentler weights + saturation so one bad feature can’t crater the score
   const W = {
-    r1: 120,            // short momentum
-    ema_cross: 5,       // trend bias
-    rsi: 0.1,           // (rsi-50) * 0.1 ≈ [-1, +1]
-    macd_hist: 6,       // momentum slope
-    bbp: 1.2,           // position within Bollinger bands
-    vol_div: 0.02,      // scale for vol penalty
-    vol_cap: 0.6        // cap vol penalty
+    r1: 80,            // was 120
+    ema_cross: 4,      // was 5
+    rsi: 0.08,         // was 0.1
+    macd_hist: 4,      // was 6
+    bbp: 0.8,          // was 1.2
+    vol_div: 0.03,     // was 0.02 → smaller penalty
+    vol_cap: 0.5,      // was 0.6 → cap a bit lower
+    clip: 6            // clip raw score to [-6, 6]
   };
 
-  const r1_sig   = (f.r1 ?? 0) * W.r1;
-  const ema_sig  = (f.ema_cross ?? 0) * W.ema_cross;
-  const rsi_sig  = (typeof f.rsi14 === "number" ? (f.rsi14 - 50) * W.rsi : 0);
-  const macd_sig = (f.macd_hist ?? 0) * W.macd_hist;
-  const bbp_sig  = (typeof f.bbp === "number" ? (f.bbp - 0.5) * W.bbp * 2 : 0); // center at 0
+  // helpers to avoid outliers dominating
+  const sat = (x, s = 2) => Math.tanh(x / s);  // smooth limiter
+
+  const r1_sig   = sat((f.r1 ?? 0) * W.r1);
+  const ema_sig  = sat((f.ema_cross ?? 0) * W.ema_cross);
+  const rsi_sig  = (typeof f.rsi14 === "number") ? sat((f.rsi14 - 50) * W.rsi) : 0;
+  const macd_sig = sat((f.macd_hist ?? 0) * W.macd_hist);
+  const bbp_sig  = (typeof f.bbp === "number") ? sat((f.bbp - 0.5) * 2 * W.bbp) : 0;
 
   const vol_pen  = (f.vol2h && isFinite(f.vol2h)) ? Math.min(f.vol2h / W.vol_div, W.vol_cap) : 0;
 
-  const raw = r1_sig + ema_sig + rsi_sig + macd_sig + bbp_sig - vol_pen;
-  const p = Number(sigmoid(raw).toFixed(6));
+  let raw = r1_sig + ema_sig + rsi_sig + macd_sig + bbp_sig - vol_pen;
+  // clip to avoid sigmoid under/overflow
+  raw = Math.max(-W.clip, Math.min(W.clip, raw));
+
+  const p = Number((1 / (1 + Math.exp(-raw))).toFixed(6));
 
   if (debug) {
     console.log("scoring components:", {
@@ -158,12 +165,9 @@ function scoreToProb(f, debug = false) {
     });
   }
 
-  return {
-    p_up: p,
-    raw_score: raw,
-    components: { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen }
-  };
+  return { p_up: p, raw_score: raw, components: { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen } };
 }
+
 
 
 async function makePredictionForCoin(coin) {
