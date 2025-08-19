@@ -149,53 +149,51 @@ function scoreToProb(f, debug = false) {
 
 
 async function makePredictionForCoin(coin) {
-  const closes = await loadCloses(coin, 240); // ~40 hours at 10-min cadence
+  const closes = await loadCloses(coin, 240);
   const canFallback = closes && closes.length >= 2;
 
-  // Try full feature set first
-  if (closes && closes.length >= 30) {
+  // Try v3 features
+  if (closes && closes.length >= 20) {
     const f = buildFeatures(closes);
     if (f) {
       const { p_up, raw_score, components } = scoreToProb(f, process.env.PRED_DEBUG === "1");
-await Prediction.create({
-  coin,
-  horizon: "24h",
-  p_up,
-  features: {
-    r1: f.r1, ema5: f.ema5, ema20: f.ema20, ema_cross: f.ema_cross,
-    rsi14: f.rsi14, vol2h: f.vol2h,
-    macd: f.macd, macd_signal: f.macd_signal, macd_hist: f.macd_hist,
-    sma20: f.sma20, sd20: f.sd20, bbp: f.bbp,
-    raw_score, components
-  },
-  model_ver: "v3-macd-bb"
-});
-
-
-
-      return { coin, p_up: doc.p_up, features: doc.features };
+      return await Prediction.create({
+        coin,
+        horizon: "24h",
+        p_up,
+        features: {
+          r1: f.r1,
+          ema5: f.ema5, ema20: f.ema20, ema_cross: f.ema_cross,
+          rsi14: f.rsi14, vol2h: f.vol2h,
+          macd: f.macd, macd_signal: f.macd_signal, macd_hist: f.macd_hist,
+          sma20: f.sma20, sd20: f.sd20, bbp: f.bbp,
+          raw_score, components
+        },
+        model_ver: "v3-macd-bb"
+      });
     }
   }
 
-  // Fallback (v1 momentum) while history accumulates
+  // Fallback (v1 momentum)
   if (canFallback) {
     const last = closes[closes.length - 1];
     const prev = closes[closes.length - 2];
     const r1 = (last - prev) / prev;
-    const p_up = +sigmoid(r1 * 150).toFixed(4);
-    const doc = await Prediction.create({
+    const p_up = +sigmoid(r1 * 150).toFixed(6);
+
+    return await Prediction.create({
       coin,
       horizon: "24h",
       p_up,
       features: { r1 },
       model_ver: "v1-fallback"
     });
-    return { coin, p_up: doc.p_up, features: doc.features };
   }
 
-  // Not enough data to do anything yet
+  // Not enough data
   return null;
 }
+
 
 (async () => {
   try {
