@@ -359,3 +359,24 @@ app.get("/api/debug/labels", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// --- Debug: matured predictions waiting for label
+app.get("/api/debug/matured", async (req, res) => {
+  try {
+    const HORIZON_MS = 24 * 60 * 60 * 1000;
+    const GRACE_MS   = 2 * 60 * 1000;
+    const cutoff = new Date(Date.now() - HORIZON_MS - GRACE_MS);
+
+    const rows = await Prediction.find({
+      ts: { $lte: cutoff },
+      $or: [ { labeled_at: { $exists: false } }, { labeled_at: null } ]
+    })
+    .sort({ ts: -1 })
+    .limit(10)
+    .lean();
+
+    res.json({ ok: true, count: rows.length, sample: rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
