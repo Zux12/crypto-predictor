@@ -316,3 +316,32 @@ app.get("/api/scores/brier_trend", async (req, res) => {
     res.status(500).json({ ok:false, error: e.message });
   }
 });
+
+app.get("/api/predictions/inspect", async (req, res) => {
+  try {
+    const coins = (req.query.coins || "bitcoin,ethereum")
+      .split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
+    const results = {};
+    for (const c of coins) {
+      const row = await Prediction.findOne({ coin: c, horizon: "24h" })
+        .sort({ ts: -1 }).lean();
+      if (row) {
+        results[c] = {
+          ts: row.ts, p_up: row.p_up, model_ver: row.model_ver,
+          components: row.features?.components || null,
+          core: {
+            r1: row.features?.r1 ?? null,
+            ema_cross: row.features?.ema_cross ?? null,
+            rsi14: row.features?.rsi14 ?? null,
+            macd_hist: row.features?.macd_hist ?? null,
+            bbp: row.features?.bbp ?? null,
+            vol2h: row.features?.vol2h ?? null
+          }
+        };
+      }
+    }
+    res.json({ ok: true, results });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
