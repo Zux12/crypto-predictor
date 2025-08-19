@@ -6,6 +6,34 @@ import PaperState from "./models/PaperState.js";
 import PaperTrade from "./models/PaperTrade.js";
 import Equity from "./models/Equity.js";
 
+// At top if needed:
+// import Label from "./models/Label.js";
+// import Prediction from "./models/Prediction.js";
+
+app.get("/api/scores/by_model", async (req, res) => {
+  try {
+    const days = Math.max(1, parseInt(req.query.days || "30", 10));
+    const since = new Date(Date.now() - days*24*60*60*1000);
+
+    const rows = await Label.aggregate([
+      { $match: { pred_ts: { $gte: since } } },
+      { $lookup: { from: "predictions", localField: "pred_id", foreignField: "_id", as: "pred" } },
+      { $unwind: "$pred" },
+      { $group: {
+          _id: "$pred.model_ver",
+          n: { $sum: 1 },
+          accuracy: { $avg: { $cond: ["$correct", 1, 0] } },
+          brier: { $avg: "$brier" }
+      }},
+      { $project: { _id: 0, model_ver: "$_id", n:1, accuracy:{ $round:["$accuracy",4] }, brier:{ $round:["$brier",6] } } },
+      { $sort: { model_ver: 1 } }
+    ]);
+
+    res.json({ ok:true, days, rows });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
 
 
 // Heroku provides env vars automatically.
