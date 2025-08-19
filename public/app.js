@@ -256,6 +256,41 @@ async function loadByModel(){
   }
 }
 
+async function loadLabelsCard(){
+  const box = document.getElementById("labels-card");
+  try {
+    const j = await fetchJSON(`/api/debug/labels?limit=8`);
+    // Debug log (remove later if noisy)
+    console.log("[Dashboard] labels response:", j);
+
+    if (!j?.ok || !j.rows || !j.rows.length) {
+      box.textContent = "Waiting for first 24h to mature…";
+      return;
+    }
+
+    // Render compact rows
+    box.innerHTML = j.rows.map(r=>{
+      const ts = new Date(r.pred_ts).toLocaleString();
+      const coin = r.coin || "—";
+      const up   = r.label_up ? "↑" : "↓";
+      const p    = typeof r.p_up === "number" ? (r.p_up*100).toFixed(1) + "%" : "—";
+      const acc  = r.correct ? "✅" : "❌";
+      const brier = (typeof r.brier === "number") ? r.brier.toFixed(4) : "—";
+      return `
+        <div class="row" style="gap:10px">
+          <span class="muted" style="min-width:160px">${ts}</span>
+          <strong style="min-width:90px">${coin}</strong>
+          <span style="min-width:70px">${up}</span>
+          <span style="min-width:100px">p_up ${p}</span>
+          <span style="min-width:70px">${acc}</span>
+          <span class="muted" style="min-width:100px">brier ${brier}</span>
+        </div>`;
+    }).join("");
+  } catch (e) {
+    console.error("[Dashboard] loadLabelsCard error:", e);
+    box.textContent = "Failed to load labels.";
+  }
+}
 
 
 // auto-refresh every 30s
