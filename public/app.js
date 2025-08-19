@@ -231,24 +231,31 @@ async function loadMonitoring(){
   }
 }
 
+
 async function loadByModel(){
+  console.log("[Dashboard] loadByModel() called");
   const div = document.getElementById("by-model");
   try {
     const j = await fetchJSON(`/api/scores/by_model?days=30`);
+    console.log("[Dashboard] by_model response:", j);
+
     if (!j?.ok || !j.rows?.length) {
       div.textContent = "Waiting for labels…";
       return;
     }
+
     div.innerHTML = j.rows.map(r => `
       <div class="row">
         <span>${r.model_ver || '—'}</span>
         <span>n=${r.n} • acc=${fmt((r.accuracy||0)*100,1)}% • brier=${fmt(r.brier,4)}</span>
       </div>
     `).join("");
-  } catch {
+  } catch (e) {
+    console.error("[Dashboard] loadByModel error:", e);
     div.textContent = "Failed to load.";
   }
 }
+
 
 
 // auto-refresh every 30s
