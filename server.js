@@ -7,6 +7,21 @@ import PaperTrade from "./models/PaperTrade.js";
 import Equity from "./models/Equity.js";
 import cors from "cors";
 
+// Heroku provides env vars automatically.
+// Locally, create a .env with MONGO_URI, JWT_SECRET, TIMEZONE.
+const PORT = process.env.PORT || 10000;
+const MONGO_URI = process.env.MONGO_URI;
+const TZ_DISPLAY = process.env.TIMEZONE || "UTC";
+
+const app = express();
+
+// Enable CORS (safe defaults)
+app.use(cors({
+  origin: true,             // reflect the request origin
+  methods: ["GET", "OPTIONS"],
+  credentials: false
+}));
+
 
 // At top if needed:
 // import Label from "./models/Label.js";
@@ -36,22 +51,6 @@ app.get("/api/scores/by_model", async (req, res) => {
     res.status(500).json({ ok:false, error:e.message });
   }
 });
-
-
-// Heroku provides env vars automatically.
-// Locally, create a .env with MONGO_URI, JWT_SECRET, TIMEZONE.
-const PORT = process.env.PORT || 10000;
-const MONGO_URI = process.env.MONGO_URI;
-const TZ_DISPLAY = process.env.TIMEZONE || "UTC";
-
-const app = express();
-
-// Enable CORS (safe defaults)
-app.use(cors({
-  origin: true,             // reflect the request origin
-  methods: ["GET", "OPTIONS"],
-  credentials: false
-}));
 
 
 // Serve static files (dashboard shell)
