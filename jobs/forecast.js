@@ -129,32 +129,42 @@ function buildFeatures(closes) {
 }
 
 // ---------- scoring ----------
-function scoreToProb(f) {
-  // Heuristic v3: blend momentum + trend + mean-reversion + volatility control.
-  // - r1 (short momentum)
-  // - ema_cross (trend)
-  // - rsi14 centered around 50 (mean-reversion/overbought-oversold)
-  // - macd_hist (momentum slope)
-  // - bbp centered around 0.5 (position within bands)
-  // - vol penalty to reduce overconfidence in high turbulence
+function scoreToProb(f, debug = false) {
+  // weights (conservative to avoid extremes)
+  const W = {
+    r1: 120,            // short momentum
+    ema_cross: 5,       // trend bias
+    rsi: 0.1,           // (rsi-50) * 0.1 ≈ [-1, +1]
+    macd_hist: 6,       // momentum slope
+    bbp: 1.2,           // position within Bollinger bands
+    vol_div: 0.02,      // scale for vol penalty
+    vol_cap: 0.6        // cap vol penalty
+  };
 
-  const r1_sig   = (f.r1 ?? 0) * 150;
-  const ema_sig  = (f.ema_cross ?? 0) * 6;
-  const rsi_sig  = (typeof f.rsi14 === "number" ? (f.rsi14 - 50) / 10 : 0);  // ~[-5,+5] → [-0.5,+0.5]
-  const macd_sig = (f.macd_hist ?? 0) * 8;                                   // histogram as momentum slope
-  const bbp_sig  = (typeof f.bbp === "number" ? (f.bbp - 0.5) * 2 : 0);      // center 0 → [-1,+1]
+  const r1_sig   = (f.r1 ?? 0) * W.r1;
+  const ema_sig  = (f.ema_cross ?? 0) * W.ema_cross;
+  const rsi_sig  = (typeof f.rsi14 === "number" ? (f.rsi14 - 50) * W.rsi : 0);
+  const macd_sig = (f.macd_hist ?? 0) * W.macd_hist;
+  const bbp_sig  = (typeof f.bbp === "number" ? (f.bbp - 0.5) * W.bbp * 2 : 0); // center at 0
 
-const vol_pen  = (f.vol2h && isFinite(f.vol2h)) ? Math.min(f.vol2h / 0.02, 0.8) : 0; 
-// gentler penalty: divide by 0.02 (~2%) instead of 0.01 (~1%)
-// cap at 0.8 instead of 1.5
+  const vol_pen  = (f.vol2h && isFinite(f.vol2h)) ? Math.min(f.vol2h / W.vol_div, W.vol_cap) : 0;
 
-const raw = r1_sig + ema_sig + rsi_sig + macd_sig + bbp_sig - vol_pen;
+  const raw = r1_sig + ema_sig + rsi_sig + macd_sig + bbp_sig - vol_pen;
+  const p = Number(sigmoid(raw).toFixed(6));
 
-// keep more precision (6 decimals) so we don’t collapse to 0/1
-const p = +sigmoid(raw).toFixed(6);
+  if (debug) {
+    console.log("scoring components:", {
+      r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen, raw, p
+    });
+  }
 
-  return { p_up: p, raw_score: raw };
+  return {
+    p_up: p,
+    raw_score: raw,
+    components: { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen }
+  };
 }
+
 
 async function makePredictionForCoin(coin) {
   const closes = await loadCloses(coin, 240); // ~40 hours at 10-min cadence
@@ -164,30 +174,32 @@ async function makePredictionForCoin(coin) {
   if (closes && closes.length >= 30) {
     const f = buildFeatures(closes);
     if (f) {
-      const { p_up, raw_score } = scoreToProb(f);
-      const doc = await Prediction.create({
-        coin,
-        horizon: "24h",
-        p_up,
-        features: {
-          r1: f.r1,
-          ema5: f.ema5,
-          ema20: f.ema20,
-          ema_cross: f.ema_cross,
-          rsi14: f.rsi14,
-          vol2h: f.vol2h,
-          ema12: f.ema12,
-          ema26: f.ema26,
-          macd: f.macd,
-          macd_signal: f.macd_signal,
-          macd_hist: f.macd_hist,
-          sma20: f.sma20,
-          sd20: f.sd20,
-          bbp: f.bbp,
-          raw_score
-        },
-        model_ver: "v3-macd-bb"
-      });
+      const { p_up, raw_score, components } = scoreToProb(f, process.env.PRED_DEBUG === "1");
+const doc = await Prediction.create({
+  coin,
+  horizon: "24h",
+  p_up,
+  features: {
+    r1: f.r1,
+    ema5: f.ema5,
+    ema20: f.ema20,
+    ema_cross: f.ema_cross,
+    rsi14: f.rsi14,
+    vol2h: f.vol2h,
+    ema12: f.ema12,
+    ema26: f.ema26,
+    macd: f.macd,
+    macd_signal: f.macd_signal,
+    macd_hist: f.macd_hist,
+    sma20: f.sma20,
+    sd20: f.sd20,
+    bbp: f.bbp,
+    raw_score,
+    components
+  },
+  model_ver: "v3-macd-bb"
+});
+
       return { coin, p_up: doc.p_up, features: doc.features };
     }
   }
