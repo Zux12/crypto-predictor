@@ -257,7 +257,9 @@ setInterval(load, 30_000);
 
 const ___origLoad = load;
 load = async function(){
-  await ___origLoad();
+  await __origLoad();
+  await loadPaper();
+  await loadMonitoring();
   await loadByModel();
 };
 
