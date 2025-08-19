@@ -125,14 +125,31 @@ function buildFeatures(closes) {
 
 // ---------- scoring ----------
 function scoreToProb(f, debug = false) {
-  const W = { r1:80, ema_cross:4, rsi:0.08, macd_hist:4, bbp:0.8, vol_div:0.03, vol_cap:0.5, clip:6 };
-  const sat = (x, s=2) => Math.tanh(x/s);
+  // tuned weights (so MACD doesn’t dominate and RSI is gentler)
+  const W = {
+    r1: 80,          // unchanged
+    ema_cross: 5,    // +1 to give trend a touch more say
+    rsi: 0.06,       // ↓ from 0.08 (less drag when RSI<50)
+    macd_hist: 3,    // ↓ from 4 (so it won’t saturate to +1 impact)
+    bbp: 0.7,        // ↓ from 0.8 (slightly softer mean reversion)
+    vol_div: 0.03,   // same
+    vol_cap: 0.5,    // same
+    clip: 6          // same
+  };
+
+  // smoother saturation so extremes compress more
+  const sat = (x, s = 3) => Math.tanh(x / s); // was 2
 
   const r1_sig   = sat((f.r1 ?? 0) * W.r1);
   const ema_sig  = sat((f.ema_cross ?? 0) * W.ema_cross);
   const rsi_sig  = (typeof f.rsi14 === "number") ? sat((f.rsi14 - 50) * W.rsi) : 0;
-  const macd_sig = sat((f.macd_hist ?? 0) * W.macd_hist);
+  let   macd_sig = sat((f.macd_hist ?? 0) * W.macd_hist);
   const bbp_sig  = (typeof f.bbp === "number") ? sat((f.bbp - 0.5) * 2 * W.bbp) : 0;
+
+  // hard-cap MACD’s impact so it can’t hit ±1 anymore
+  const MACD_CAP = 0.8;
+  if (macd_sig >  MACD_CAP) macd_sig =  MACD_CAP;
+  if (macd_sig < -MACD_CAP) macd_sig = -MACD_CAP;
 
   const vol_pen  = (f.vol2h && isFinite(f.vol2h)) ? Math.min(f.vol2h / W.vol_div, W.vol_cap) : 0;
 
@@ -140,10 +157,13 @@ function scoreToProb(f, debug = false) {
   raw = Math.max(-W.clip, Math.min(W.clip, raw));
   const p = Number((1 / (1 + Math.exp(-raw))).toFixed(6));
 
-  if (debug) console.log("scoring components:", { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen, raw, p });
+  if (debug) {
+    console.log("scoring components:", { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen, raw, p });
+  }
 
   return { p_up: p, raw_score: raw, components: { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen } };
 }
+
 
 
 
