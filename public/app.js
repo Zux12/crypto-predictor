@@ -255,8 +255,10 @@ async function loadByModel(){
 load();
 setInterval(load, 30_000);
 
-const __origLoad = load;
+const ___origLoad = load;
 load = async function(){
-  await __origLoad();
-  await loadMonitoring();
+  await ___origLoad();
+  await loadByModel();
+};
+
 };
