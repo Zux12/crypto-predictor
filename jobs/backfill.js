@@ -119,37 +119,57 @@ function buildFeaturesFromCloses(closes, i /* index of bar to compute on */) {
 }
 
 // ---------- fetch 10-min klines from Binance over a time range ----------
+async function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
 async function fetchKlines10m(symbol, startMs, endMs) {
   const out = [];
   let cursor = startMs;
-  while (cursor < endMs) {
-    const url = `${BAPI}?symbol=${symbol}&interval=10m&limit=${MAX_LIMIT}&startTime=${cursor}&endTime=${endMs}`;
-    const r = await fetch(url, { headers: { "accept":"application/json" }});
+  const NOW = endMs || Date.now();
+
+  while (cursor < NOW) {
+    const url = `${BAPI}?symbol=${symbol}&interval=10m&limit=${MAX_LIMIT}&startTime=${cursor}`;
+    let r, arr;
+
+    // basic retry (3 tries) in case of transient 4xx/5xx
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      r = await fetch(url, { headers: { "accept": "application/json" } });
+      if (r.ok) break;
+      if (attempt < 3) await sleep(300 * attempt);
+    }
     if (!r.ok) throw new Error(`Binance ${symbol} HTTP ${r.status}`);
-    const arr = await r.json();
+
+    arr = await r.json();
     if (!Array.isArray(arr) || arr.length === 0) break;
+
     // arr[i] = [ openTime, open, high, low, close, volume, closeTime, ... ]
     for (const k of arr) {
       const close = Number(k[4]);
-      const ts = Number(k[6]); // closeTime ms
-      out.push({ ts, close });
+      const closeTime = Number(k[6]);          // ms
+      out.push({ ts: closeTime, close });
     }
-    const lastTs = Number(arr[arr.length - 1][6]);
-    const prevCursor = cursor;
-    cursor = lastTs + 1; // move forward
-    if (cursor <= prevCursor) break; // safety
-    // be nice
-    await new Promise(r => setTimeout(r, 120));
+
+    // advance cursor using **last closeTime** + 1ms
+    const lastClose = Number(arr[arr.length - 1][6]);
+    const nextCursor = lastClose + 1;
+
+    // stop if Binance gave us stale page
+    if (nextCursor <= cursor) break;
+    cursor = nextCursor;
+
+    // be polite; avoid 429
+    await sleep(120);
   }
-  // ensure time-ascending & unique
+
+  // sort + dedupe
   out.sort((a,b)=>a.ts - b.ts);
   const dedup = [];
-  let lastSeen = -1;
+  let lastTs = -1;
   for (const x of out) {
-    if (x.ts !== lastSeen) dedup.push(x), lastSeen = x.ts;
+    if (x.ts !== lastTs) dedup.push(x), lastTs = x.ts;
   }
   return dedup;
 }
+
 
 async function backfillCoin(coin, symbol, col) {
   const now = Date.now();
