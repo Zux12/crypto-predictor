@@ -65,61 +65,62 @@ async function loadCloses(coin, n = 240) {
 function buildFeatures(closes) {
   // Need enough history for all indicators
   // EMA20, RSI14, MACD(12/26) & signal(9), BB(20, 2σ) → ensure >= 26 for MACD base, >= 20 for BB, >= 14 for RSI.
-  if (closes.length < 30) return null;
+  if (closes.length < 20) return null;
 
   const last = closes[closes.length - 1];
   const prev = closes[closes.length - 2];
   const r1 = (last - prev) / prev; // 1-step (~10m) return
 
-  // EMAs
-  const ema5  = ema(closes.slice(-25), 5);
-  const ema20 = ema(closes.slice(-100), 20);
-  const ema_cross = (ema5 && ema20) ? (ema5 - ema20) / ema20 : null;
+  // EMAs & cross (work with shorter tails)
+const tailEma5  = closes.slice(-Math.max(10, Math.min(25, closes.length)));
+const tailEma20 = closes.slice(-Math.max(25, Math.min(80, closes.length)));
+const ema5  = ema(tailEma5, 5);
+const ema20 = ema(tailEma20, 20);
+const ema_cross = (ema5 != null && ema20 != null && ema20 !== 0) ? (ema5 - ema20) / ema20 : null;
 
-  // RSI14 over recent window
-  const rsi14 = rsi(closes.slice(-60), 14);
+// RSI14 (try with 30–60 closes)
+const tailRsi = closes.slice(-Math.max(20, Math.min(60, closes.length)));
+const rsi14 = rsi(tailRsi, 14);
 
-  // Short-horizon volatility (last 12 steps ≈ 2 hours)
-  const rets = [];
-  for (let i = closes.length - 12; i < closes.length; i++) {
-    if (i <= 0) continue;
-    rets.push((closes[i] - closes[i-1]) / closes[i-1]);
+// 2h vol (up to last 12 returns, or fewer if not available)
+const rets = [];
+const span = Math.min(12, closes.length - 1);
+for (let i = closes.length - span; i < closes.length; i++) {
+  if (i <= 0) continue;
+  rets.push((closes[i] - closes[i-1]) / closes[i-1]);
+}
+const vol2h = stdev(rets);
+
+// MACD(12,26) + signal(9) (use whatever we have, min ~26)
+const tailForMacd = closes.slice(-Math.max(30, Math.min(120, closes.length)));
+let macd = null, macd_signal = null, macd_hist = null;
+if (tailForMacd.length >= 26) {
+  // build series for signal smoothing
+  const macdSeries = [];
+  for (let i = 26; i < tailForMacd.length; i++) {
+    const slice = tailForMacd.slice(0, i+1);
+    const e12 = ema(slice, 12);
+    const e26 = ema(slice, 26);
+    if (e12 != null && e26 != null) macdSeries.push(e12 - e26);
   }
-  const vol2h = stdev(rets);
-
-  // --- NEW: MACD (12, 26) and signal (9) on MACD ---
-  // compute EMA12 and EMA26 from a reasonable tail window
-  const tailForMacd = closes.slice(-120); // ~20 hours of 10-min bars
-  const ema12 = ema(tailForMacd, 12);
-  const ema26 = ema(tailForMacd, 26);
-  let macd = null, macd_signal = null, macd_hist = null;
-  if (ema12 != null && ema26 != null) {
-    macd = ema12 - ema26;
-    // For signal, approximate using last ~40 points of macd proxy (cheap approach):
-    // In a full implementation you'd compute macd at each step; here we reuse current macd.
-    // We'll still create a meaningful signal by smoothing the last ~40 prices' macd proxy.
-    const macdSeries = [];
-    // Build a crude series by recomputing EMA12-EMA26 along the tail (cheap but serviceable)
-    for (let i = 26; i < tailForMacd.length; i++) {
-      const slice = tailForMacd.slice(0, i+1);
-      const e12 = ema(slice, 12);
-      const e26 = ema(slice, 26);
-      if (e12 != null && e26 != null) macdSeries.push(e12 - e26);
-    }
-    macd_signal = ema(macdSeries, 9);
+  if (macdSeries.length) {
+    macd = macdSeries[macdSeries.length - 1];
+    macd_signal = ema(macdSeries, Math.min(9, macdSeries.length));
     if (macd_signal != null) macd_hist = macd - macd_signal;
   }
+}
 
-  // --- NEW: Bollinger Bands %B (20, 2σ) ---
-  const windowBB = closes.slice(-40); // enough for SMA20 + stdev20
-  const sma20 = sma(windowBB, 20);
-  const sd20  = stdev(windowBB.slice(-20));
-  let bbp = null; // %B = (price - lower) / (upper - lower)
-  if (sma20 != null && sd20 != null && sd20 > 0) {
-    const upper = sma20 + 2 * sd20;
-    const lower = sma20 - 2 * sd20;
-    bbp = (last - lower) / (upper - lower); // typically in [0,1], can go outside
-  }
+// Bollinger %B (20,2σ) (work with ≥20 closes)
+const tailBB = closes.slice(-Math.max(20, Math.min(40, closes.length)));
+const sma20 = sma(tailBB, 20);
+const sd20  = stdev(tailBB.slice(-20));
+let bbp = null;
+if (sma20 != null && sd20 != null && sd20 > 0) {
+  const upper = sma20 + 2 * sd20;
+  const lower = sma20 - 2 * sd20;
+  bbp = (last - lower) / (upper - lower);
+}
+
 
   return {
     last, r1, ema5, ema20, ema_cross, rsi14, vol2h,
