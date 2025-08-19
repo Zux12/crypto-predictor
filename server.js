@@ -523,3 +523,51 @@ app.get("/api/export/training.csv", async (req, res) => {
     res.status(500).send(`error,${(e && e.message) || e}`);
   }
 });
+
+app.get("/api/export/backfill.csv", async (req, res) => {
+  try {
+    const coin = (req.query.coin || "all").toLowerCase();
+    const limit = Math.min(200000, parseInt(req.query.limit || "50000", 10));
+    const match = {};
+    if (coin !== "all") match.coin = coin;
+
+    const db = mongoose.connection.db;
+    const col = db.collection("backfill_training");
+
+    const cursor = col.find(match).sort({ ts: 1 }).limit(limit);
+    const header = [
+      "coin","ts","horizon",
+      "r1","ema_cross","rsi14","macd_hist","bbp","vol2h",
+      "label_up","realized_ret"
+    ];
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="backfill_${coin}_${limit}.csv"`);
+
+    // stream CSV
+    res.write(header.join(",") + "\n");
+    const toCSV = (v) => {
+      if (v === null || v === undefined) return "";
+      if (v instanceof Date) return v.toISOString();
+      if (typeof v === "string") return `"${v.replace(/"/g,'""')}"`;
+      return String(v);
+    };
+    for await (const r of cursor) {
+      res.write([
+        toCSV(r.coin),
+        toCSV(r.ts),
+        toCSV(r.horizon),
+        toCSV(r.r1),
+        toCSV(r.ema_cross),
+        toCSV(r.rsi14),
+        toCSV(r.macd_hist),
+        toCSV(r.bbp),
+        toCSV(r.vol2h),
+        toCSV(r.label_up),
+        toCSV(r.realized_ret)
+      ].join(",") + "\n");
+    }
+    res.end();
+  } catch (e) {
+    res.status(500).send(`error,${(e && e.message) || e}`);
+  }
+});
