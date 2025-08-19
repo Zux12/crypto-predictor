@@ -334,10 +334,12 @@ load = async function(){
     await loadMonitoring();
     await loadByModel();
     await loadLabelsCard();
+    await loadPnL();   // 👈 new
   } catch (e) {
-    console.error("[Dashboard] top-level load error:", e);
+    console.error("[Dashboard] load error:", e);
   }
 };
+
 
 load();
 setInterval(load, 30_000);
