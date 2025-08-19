@@ -417,3 +417,33 @@ app.get("/api/debug/matured", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+import PaperState from "./models/PaperState.js";
+import PaperTrade from "./models/PaperTrade.js";
+
+app.get("/api/paper/pnl", async (_req, res) => {
+  try {
+    const s = await PaperState.findById("default").lean();
+    if (!s) return res.json({ ok: true, pnl: null });
+
+    const startBal = s.params?.start_bal || 10000;
+    const eq = Number(s.equity_usd || 0);
+
+    // sum up fees from trades
+    const totalFees = await PaperTrade.aggregate([
+      { $group: { _id: null, fees: { $sum: "$fee_usd" } } }
+    ]);
+
+    const pnl = {
+      start_balance: startBal,
+      current_equity: eq,
+      net_pnl_usd: eq - startBal,
+      net_pnl_pct: ((eq - startBal) / startBal) * 100,
+      total_fees: totalFees?.[0]?.fees || 0
+    };
+
+    res.json({ ok: true, pnl });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
