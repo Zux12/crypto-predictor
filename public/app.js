@@ -301,6 +301,29 @@ async function loadLabelsCard(){
   }
 }
 
+async function loadPnL(){
+  const box = document.getElementById("pnl-card");
+  try {
+    const j = await fetchJSON(`/api/paper/pnl`);
+    if (!j?.ok || !j.pnl) {
+      box.textContent = "No PnL yet.";
+      return;
+    }
+    const p = j.pnl;
+    const net = p.net_pnl_usd.toFixed(2);
+    const pct = p.net_pnl_pct.toFixed(2);
+    const color = p.net_pnl_usd >= 0 ? "good" : "bad";
+    box.innerHTML = `
+      <div class="row"><span>Start</span><span>$${fmt(p.start_balance,2)}</span></div>
+      <div class="row"><span>Current</span><span>$${fmt(p.current_equity,2)}</span></div>
+      <div class="row"><span>PnL</span><span class="${color}">$${net} (${pct}%)</span></div>
+      <div class="row"><span>Total Fees</span><span>$${fmt(p.total_fees,2)}</span></div>
+    `;
+  } catch (e) {
+    box.textContent = "Failed to load PnL.";
+  }
+}
+
 
 // ---- override load() ONCE, then call it + schedule auto-refresh ----
 const originalLoad = load;
