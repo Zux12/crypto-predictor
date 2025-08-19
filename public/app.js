@@ -8,10 +8,24 @@ function pill(p){
 }
 
 async function fetchJSON(url){
-  const r = await fetch(url, { headers: { "accept":"application/json" }});
-  if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`);
-  return r.json();
+  try {
+    const r = await fetch(url, { headers: { "accept": "application/json" }});
+    if (!r.ok) {
+      console.warn("[fetchJSON] non-200", url, r.status);
+      return { ok: false, _http: r.status, _url: url };
+    }
+    try {
+      return await r.json();
+    } catch (parseErr) {
+      console.error("[fetchJSON] JSON parse error", url, parseErr);
+      return { ok: false, _parse: true, _url: url };
+    }
+  } catch (e) {
+    console.error("[fetchJSON] network error", url, e);
+    return { ok: false, _err: String(e), _url: url };
+  }
 }
+
 
 async function load(){
   const [prices, preds, scores] = await Promise.all([
@@ -288,15 +302,20 @@ async function loadLabelsCard(){
 }
 
 
-// auto-refresh every 30s
+// ---- override load() ONCE, then call it + schedule auto-refresh ----
+const originalLoad = load;
+load = async function(){
+  try {
+    await originalLoad();
+    await loadPaper();
+    await loadMonitoring();
+    await loadByModel();
+    await loadLabelsCard();
+  } catch (e) {
+    console.error("[Dashboard] top-level load error:", e);
+  }
+};
+
 load();
 setInterval(load, 30_000);
 
-const ___origLoad = load;
-load = async function(){
-  await __origLoad();
-  await loadPaper();
-  await loadMonitoring();
-  await loadByModel();
-  await loadLabelsCard();
-};
