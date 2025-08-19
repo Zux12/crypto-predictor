@@ -63,25 +63,24 @@ async function loadCloses(coin, n = 240) {
 
 // ---------- feature builders ----------
 function buildFeatures(closes) {
-  // Be permissive so we compute ASAP
   if (!closes || closes.length < 20) return null;
 
   const last = closes[closes.length - 1];
   const prev = closes[closes.length - 2];
   const r1 = (last - prev) / prev;
 
-  // --- EMA cross (works with shorter tails)
+  // EMA cross (shorter tails OK)
   const tailEma5  = closes.slice(-Math.max(10, Math.min(25, closes.length)));
   const tailEma20 = closes.slice(-Math.max(25, Math.min(80, closes.length)));
   const ema5  = ema(tailEma5, 5);
   const ema20 = ema(tailEma20, 20);
   const ema_cross = (ema5 != null && ema20 != null && ema20 !== 0) ? (ema5 - ema20) / ema20 : null;
 
-  // --- RSI14 (accept 30–60 closes)
+  // RSI14 (accept 30–60 closes)
   const tailRsi = closes.slice(-Math.max(30, Math.min(60, closes.length)));
   const rsi14 = rsi(tailRsi, 14);
 
-  // --- Short vol (up to last 12 returns)
+  // short vol (up to 12 returns)
   const span = Math.min(12, closes.length - 1);
   const rets = [];
   for (let i = closes.length - span; i < closes.length; i++) {
@@ -90,7 +89,7 @@ function buildFeatures(closes) {
   }
   const vol2h = stdev(rets);
 
-  // --- MACD(12,26) + signal(9)
+  // MACD(12,26) + signal(9)
   const tailForMacd = closes.slice(-Math.max(30, Math.min(120, closes.length)));
   let macd = null, macd_signal = null, macd_hist = null;
   if (tailForMacd.length >= 26) {
@@ -108,7 +107,7 @@ function buildFeatures(closes) {
     }
   }
 
-  // --- Bollinger %B (20, 2σ)
+  // Bollinger %B (20, 2σ)
   const tailBB = closes.slice(-Math.max(20, Math.min(40, closes.length)));
   const sma20 = sma(tailBB, 20);
   const sd20  = stdev(tailBB.slice(-20));
@@ -123,22 +122,11 @@ function buildFeatures(closes) {
 }
 
 
+
 // ---------- scoring ----------
 function scoreToProb(f, debug = false) {
-  // gentler weights + saturation so one bad feature can’t crater the score
-  const W = {
-    r1: 80,            // was 120
-    ema_cross: 4,      // was 5
-    rsi: 0.08,         // was 0.1
-    macd_hist: 4,      // was 6
-    bbp: 0.8,          // was 1.2
-    vol_div: 0.03,     // was 0.02 → smaller penalty
-    vol_cap: 0.5,      // was 0.6 → cap a bit lower
-    clip: 6            // clip raw score to [-6, 6]
-  };
-
-  // helpers to avoid outliers dominating
-  const sat = (x, s = 2) => Math.tanh(x / s);  // smooth limiter
+  const W = { r1:80, ema_cross:4, rsi:0.08, macd_hist:4, bbp:0.8, vol_div:0.03, vol_cap:0.5, clip:6 };
+  const sat = (x, s=2) => Math.tanh(x/s);
 
   const r1_sig   = sat((f.r1 ?? 0) * W.r1);
   const ema_sig  = sat((f.ema_cross ?? 0) * W.ema_cross);
@@ -149,19 +137,14 @@ function scoreToProb(f, debug = false) {
   const vol_pen  = (f.vol2h && isFinite(f.vol2h)) ? Math.min(f.vol2h / W.vol_div, W.vol_cap) : 0;
 
   let raw = r1_sig + ema_sig + rsi_sig + macd_sig + bbp_sig - vol_pen;
-  // clip to avoid sigmoid under/overflow
   raw = Math.max(-W.clip, Math.min(W.clip, raw));
-
   const p = Number((1 / (1 + Math.exp(-raw))).toFixed(6));
 
-  if (debug) {
-    console.log("scoring components:", {
-      r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen, raw, p
-    });
-  }
+  if (debug) console.log("scoring components:", { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen, raw, p });
 
   return { p_up: p, raw_score: raw, components: { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen } };
 }
+
 
 
 
@@ -174,7 +157,7 @@ async function makePredictionForCoin(coin) {
     const f = buildFeatures(closes);
     if (f) {
       const { p_up, raw_score, components } = scoreToProb(f, process.env.PRED_DEBUG === "1");
-const doc = await Prediction.create({
+await Prediction.create({
   coin,
   horizon: "24h",
   p_up,
@@ -187,6 +170,7 @@ const doc = await Prediction.create({
   },
   model_ver: "v3-macd-bb"
 });
+
 
 
       return { coin, p_up: doc.p_up, features: doc.features };
