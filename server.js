@@ -345,3 +345,17 @@ app.get("/api/predictions/inspect", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// --- Debug: last N labels (default 5)
+app.get("/api/debug/labels", async (req, res) => {
+  try {
+    const limit = Math.min(50, parseInt(req.query.limit || "5", 10));
+    const rows = await Label.find({})
+      .sort({ pred_ts: -1 })
+      .limit(limit)
+      .lean();
+    res.json({ ok: true, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
