@@ -141,12 +141,7 @@ async function loadPaper(){
   }
 }
 
-// hook into your existing loader + auto-refresh
-const _origLoad = load;
-load = async function(){
-  await _origLoad();
-  await loadPaper();
-};
+
 
 // --- Monitoring client helpers ---
 function svgBarChart(pairs, width=600, height=120, pad=6){
@@ -305,5 +300,3 @@ load = async function(){
   await loadByModel();
   await loadLabelsCard();
 };
-
-
