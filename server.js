@@ -444,3 +444,82 @@ app.get("/api/paper/pnl", async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// CSV export of labeled training data (last N days)
+app.get("/api/export/training.csv", async (req, res) => {
+  try {
+    const days = Math.max(1, parseInt(req.query.days || "90", 10));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Join labels -> predictions to fetch features + model_ver
+    const rows = await Label.aggregate([
+      { $match: { pred_ts: { $gte: since } } },
+      { $lookup: {
+          from: "predictions",
+          localField: "pred_id",
+          foreignField: "_id",
+          as: "pred"
+      }},
+      { $unwind: "$pred" },
+      { $project: {
+          _id: 0,
+          coin: "$coin",
+          pred_ts: "$pred_ts",
+          horizon: "$horizon",
+          model_ver: "$pred.model_ver",
+          p_up: "$p_up",
+          // core features (may be null if missing)
+          r1: { $ifNull: ["$pred.features.r1", null] },
+          ema_cross: { $ifNull: ["$pred.features.ema_cross", null] },
+          rsi14: { $ifNull: ["$pred.features.rsi14", null] },
+          macd_hist: { $ifNull: ["$pred.features.macd_hist", null] },
+          bbp: { $ifNull: ["$pred.features.bbp", null] },
+          vol2h: { $ifNull: ["$pred.features.vol2h", null] },
+          // labels / outcomes
+          label_up: "$label_up",
+          realized_ret: "$realized_ret"
+      }},
+      { $sort: { pred_ts: 1 } }
+    ]);
+
+    // Build CSV
+    const header = [
+      "coin","pred_ts","horizon","model_ver","p_up",
+      "r1","ema_cross","rsi14","macd_hist","bbp","vol2h",
+      "label_up","realized_ret"
+    ];
+    const toCSV = (v) => {
+      if (v === null || v === undefined) return "";
+      if (v instanceof Date) return v.toISOString();
+      if (typeof v === "string") {
+        // escape quotes
+        return `"${v.replace(/"/g,'""')}"`;
+      }
+      return String(v);
+    };
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      lines.push([
+        toCSV(r.coin),
+        toCSV(r.pred_ts),
+        toCSV(r.horizon),
+        toCSV(r.model_ver),
+        toCSV(r.p_up),
+        toCSV(r.r1),
+        toCSV(r.ema_cross),
+        toCSV(r.rsi14),
+        toCSV(r.macd_hist),
+        toCSV(r.bbp),
+        toCSV(r.vol2h),
+        toCSV(r.label_up),
+        toCSV(r.realized_ret)
+      ].join(","));
+    }
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="training_${days}d.csv"`);
+    res.send(lines.join("\n"));
+  } catch (e) {
+    res.status(500).send(`error,${(e && e.message) || e}`);
+  }
+});
