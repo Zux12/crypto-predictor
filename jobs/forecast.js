@@ -63,71 +63,65 @@ async function loadCloses(coin, n = 240) {
 
 // ---------- feature builders ----------
 function buildFeatures(closes) {
-  // Need enough history for all indicators
-  // EMA20, RSI14, MACD(12/26) & signal(9), BB(20, 2σ) → ensure >= 26 for MACD base, >= 20 for BB, >= 14 for RSI.
-  if (closes.length < 20) return null;
+  // Be permissive so we compute ASAP
+  if (!closes || closes.length < 20) return null;
 
   const last = closes[closes.length - 1];
   const prev = closes[closes.length - 2];
-  const r1 = (last - prev) / prev; // 1-step (~10m) return
+  const r1 = (last - prev) / prev;
 
-  // EMAs & cross (work with shorter tails)
-const tailEma5  = closes.slice(-Math.max(10, Math.min(25, closes.length)));
-const tailEma20 = closes.slice(-Math.max(25, Math.min(80, closes.length)));
-const ema5  = ema(tailEma5, 5);
-const ema20 = ema(tailEma20, 20);
-const ema_cross = (ema5 != null && ema20 != null && ema20 !== 0) ? (ema5 - ema20) / ema20 : null;
+  // --- EMA cross (works with shorter tails)
+  const tailEma5  = closes.slice(-Math.max(10, Math.min(25, closes.length)));
+  const tailEma20 = closes.slice(-Math.max(25, Math.min(80, closes.length)));
+  const ema5  = ema(tailEma5, 5);
+  const ema20 = ema(tailEma20, 20);
+  const ema_cross = (ema5 != null && ema20 != null && ema20 !== 0) ? (ema5 - ema20) / ema20 : null;
 
-// RSI14 (try with 30–60 closes)
-const tailRsi = closes.slice(-Math.max(20, Math.min(60, closes.length)));
-const rsi14 = rsi(tailRsi, 14);
+  // --- RSI14 (accept 30–60 closes)
+  const tailRsi = closes.slice(-Math.max(30, Math.min(60, closes.length)));
+  const rsi14 = rsi(tailRsi, 14);
 
-// 2h vol (up to last 12 returns, or fewer if not available)
-const rets = [];
-const span = Math.min(12, closes.length - 1);
-for (let i = closes.length - span; i < closes.length; i++) {
-  if (i <= 0) continue;
-  rets.push((closes[i] - closes[i-1]) / closes[i-1]);
-}
-const vol2h = stdev(rets);
-
-// MACD(12,26) + signal(9) (use whatever we have, min ~26)
-const tailForMacd = closes.slice(-Math.max(30, Math.min(120, closes.length)));
-let macd = null, macd_signal = null, macd_hist = null;
-if (tailForMacd.length >= 26) {
-  // build series for signal smoothing
-  const macdSeries = [];
-  for (let i = 26; i < tailForMacd.length; i++) {
-    const slice = tailForMacd.slice(0, i+1);
-    const e12 = ema(slice, 12);
-    const e26 = ema(slice, 26);
-    if (e12 != null && e26 != null) macdSeries.push(e12 - e26);
+  // --- Short vol (up to last 12 returns)
+  const span = Math.min(12, closes.length - 1);
+  const rets = [];
+  for (let i = closes.length - span; i < closes.length; i++) {
+    if (i <= 0) continue;
+    rets.push((closes[i] - closes[i - 1]) / closes[i - 1]);
   }
-  if (macdSeries.length) {
-    macd = macdSeries[macdSeries.length - 1];
-    macd_signal = ema(macdSeries, Math.min(9, macdSeries.length));
-    if (macd_signal != null) macd_hist = macd - macd_signal;
+  const vol2h = stdev(rets);
+
+  // --- MACD(12,26) + signal(9)
+  const tailForMacd = closes.slice(-Math.max(30, Math.min(120, closes.length)));
+  let macd = null, macd_signal = null, macd_hist = null;
+  if (tailForMacd.length >= 26) {
+    const macdSeries = [];
+    for (let i = 26; i < tailForMacd.length; i++) {
+      const slice = tailForMacd.slice(0, i + 1);
+      const e12 = ema(slice, 12);
+      const e26 = ema(slice, 26);
+      if (e12 != null && e26 != null) macdSeries.push(e12 - e26);
+    }
+    if (macdSeries.length) {
+      macd = macdSeries[macdSeries.length - 1];
+      macd_signal = ema(macdSeries, Math.min(9, macdSeries.length));
+      if (macd_signal != null) macd_hist = macd - macd_signal;
+    }
   }
+
+  // --- Bollinger %B (20, 2σ)
+  const tailBB = closes.slice(-Math.max(20, Math.min(40, closes.length)));
+  const sma20 = sma(tailBB, 20);
+  const sd20  = stdev(tailBB.slice(-20));
+  let bbp = null;
+  if (sma20 != null && sd20 != null && sd20 > 0) {
+    const upper = sma20 + 2 * sd20;
+    const lower = sma20 - 2 * sd20;
+    bbp = (last - lower) / (upper - lower);
+  }
+
+  return { last, r1, ema5, ema20, ema_cross, rsi14, vol2h, macd, macd_signal, macd_hist, sma20, sd20, bbp };
 }
 
-// Bollinger %B (20,2σ) (work with ≥20 closes)
-const tailBB = closes.slice(-Math.max(20, Math.min(40, closes.length)));
-const sma20 = sma(tailBB, 20);
-const sd20  = stdev(tailBB.slice(-20));
-let bbp = null;
-if (sma20 != null && sd20 != null && sd20 > 0) {
-  const upper = sma20 + 2 * sd20;
-  const lower = sma20 - 2 * sd20;
-  bbp = (last - lower) / (upper - lower);
-}
-
-
-  return {
-    last, r1, ema5, ema20, ema_cross, rsi14, vol2h,
-    ema12, ema26, macd, macd_signal, macd_hist,
-    sma20, sd20, bbp
-  };
-}
 
 // ---------- scoring ----------
 function scoreToProb(f, debug = false) {
@@ -185,25 +179,15 @@ const doc = await Prediction.create({
   horizon: "24h",
   p_up,
   features: {
-    r1: f.r1,
-    ema5: f.ema5,
-    ema20: f.ema20,
-    ema_cross: f.ema_cross,
-    rsi14: f.rsi14,
-    vol2h: f.vol2h,
-    ema12: f.ema12,
-    ema26: f.ema26,
-    macd: f.macd,
-    macd_signal: f.macd_signal,
-    macd_hist: f.macd_hist,
-    sma20: f.sma20,
-    sd20: f.sd20,
-    bbp: f.bbp,
-    raw_score,
-    components
+    r1: f.r1, ema5: f.ema5, ema20: f.ema20, ema_cross: f.ema_cross,
+    rsi14: f.rsi14, vol2h: f.vol2h,
+    macd: f.macd, macd_signal: f.macd_signal, macd_hist: f.macd_hist,
+    sma20: f.sma20, sd20: f.sd20, bbp: f.bbp,
+    raw_score, components
   },
   model_ver: "v3-macd-bb"
 });
+
 
       return { coin, p_up: doc.p_up, features: doc.features };
     }
