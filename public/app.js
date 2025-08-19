@@ -303,6 +303,7 @@ load = async function(){
   await loadPaper();
   await loadMonitoring();
   await loadByModel();
+  await loadLabelsCard();
 };
 
 
