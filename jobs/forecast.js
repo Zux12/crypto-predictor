@@ -144,10 +144,15 @@ function scoreToProb(f) {
   const macd_sig = (f.macd_hist ?? 0) * 8;                                   // histogram as momentum slope
   const bbp_sig  = (typeof f.bbp === "number" ? (f.bbp - 0.5) * 2 : 0);      // center 0 → [-1,+1]
 
-  const vol_pen  = (f.vol2h && isFinite(f.vol2h)) ? Math.min(f.vol2h / 0.01, 1.5) : 0; // >1% 10m vol → penalty
+const vol_pen  = (f.vol2h && isFinite(f.vol2h)) ? Math.min(f.vol2h / 0.02, 0.8) : 0; 
+// gentler penalty: divide by 0.02 (~2%) instead of 0.01 (~1%)
+// cap at 0.8 instead of 1.5
 
-  const raw = r1_sig + ema_sig + rsi_sig + macd_sig + bbp_sig - vol_pen;
-  const p = +sigmoid(raw).toFixed(4);
+const raw = r1_sig + ema_sig + rsi_sig + macd_sig + bbp_sig - vol_pen;
+
+// keep more precision (6 decimals) so we don’t collapse to 0/1
+const p = +sigmoid(raw).toFixed(6);
+
   return { p_up: p, raw_score: raw };
 }
 
