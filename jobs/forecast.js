@@ -186,15 +186,63 @@ function predictLogReg(features){
   return 1 / (1 + Math.exp(-s));
 }
 
-const p_up = predictLogReg(f);   // instead of simple weights
-docs.push({
-  coin,
-  horizon: "24h",
-  p_up,
-  features: f,
-  model_ver: "v4-ai-logreg",
-  ts: new Date()
+// const p_up = predictLogReg(f);   // instead of simple weights
+// docs.push({
+//  coin,
+//  horizon: "24h",
+//  p_up,
+//  features: f,
+//  model_ver: "v4-ai-logreg",
+//  ts: new Date()
+// });
+
+// after computing features f
+const p_up_v4 = predictLogReg(f);
+await Prediction.create({
+  coin, horizon:"24h", p_up: p_up_v4, features: f, model_ver: "v4-ai-logreg"
 });
+
+// optional: also write the heuristic (v3) for comparison
+const p_up_v3 = /* your previous v3 scoring function */;
+await Prediction.create({
+  coin, horizon:"24h", p_up: p_up_v3, features: f, model_ver: "v3-macd-bb"
+});
+
+
+
+function safeNumber(x, fallback=0){
+  const v = Number(x);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function predictLogReg(features){
+  const means = [/* your means */];
+  const scales = [/* your scales */];
+  const coefs  = [/* your coefs */];
+  const intercept = /* your intercept */;
+
+  const xs = [
+    safeNumber(features.r1),
+    safeNumber(features.ema_cross),
+    safeNumber(features.rsi14),
+    safeNumber(features.macd_hist),
+    safeNumber(features.bbp),
+    safeNumber(features.vol2h)
+  ];
+
+  const z = xs.map((v,i)=>{
+    const s = scales[i] || 1e-9; // avoid divide-by-zero
+    return (v - means[i]) / s;
+  });
+
+  let s = safeNumber(intercept);
+  for (let i=0; i<coefs.length; i++) s += safeNumber(coefs[i]) * z[i];
+
+  // clip → sigmoid
+  const clipped = Math.max(-10, Math.min(10, s));
+  return 1 / (1 + Math.exp(-clipped));
+}
+
 
 
 async function makePredictionForCoin(coin) {
