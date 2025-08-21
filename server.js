@@ -11,6 +11,8 @@ import tradesRoute from "./routes/trades.js";
 app.use("/api/trades", tradesRoute);
 import metricsRoute from "./routes/metrics.js";
 app.use("/api", metricsRoute); // exposes /api/calibration/last30d and /api/accuracy/trend
+import labelsRoute from "./routes/labels.js";
+app.use("/api/labels", labelsRoute);
 
 
 
