@@ -31,63 +31,72 @@ async function load(){
   const [prices, preds, scores] = await Promise.all([
     fetchJSON(`/api/prices/latest?coins=${coins.join(",")}`),
     fetchJSON(`/api/predictions/latest?coins=${coins.join(",")}`),
-    fetchJSON(`/api/scores/summary?days=7`).catch(()=>({ ok:false })) // will be empty until 24h
+    fetchJSON(`/api/scores/summary?days=7`) // fetchJSON is resilient
   ]);
 
-  // Prices
+  // Prices (resilient if results missing)
   const pDiv = document.getElementById("prices");
+  const priceResults = prices?.results || {};
   pDiv.innerHTML = coins.map(c=>{
-    const row = prices.results?.[c];
-    return `<div class="row"><span>${c}</span><strong>$${fmt(row?.price, 2)}</strong></div>`;
+    const row = priceResults[c] || {};
+    return `<div class="row"><span>${c}</span><strong>$${fmt(row.price, 2)}</strong></div>`;
   }).join("");
 
-// Predictions (show multiple models per coin)
-const prDiv = document.getElementById("preds");
-prDiv.innerHTML = coins.map(c=>{
-  const arr = preds.results?.[c] || []; // array of {model_ver, p_up, ts}
-  if (!arr.length) {
+  // Predictions (show multiple models per coin)
+  const prDiv = document.getElementById("preds");
+  prDiv.innerHTML = coins.map(c=>{
+    const arr = (preds?.results?.[c] || []).slice(); // copy to avoid mutating
+    // sort latest first
+    arr.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
+
+    const activeModel = (window.ACTIVE_MODEL || "v3-macd-bb");
+
+    if (!arr.length) {
+      return `
+        <div class="row"><strong>${c}</strong><span></span></div>
+        <div class="row" style="margin-left:12px">
+          <span class="muted">no predictions yet</span>
+        </div>`;
+    }
+
+    const lines = arr.map(row=>{
+      const p = row.p_up;
+      const t = row.ts ? new Date(row.ts).toLocaleString() : "—";
+      const model = row.model_ver || "—";
+      const isActive = (model === activeModel);
+      const tag = isActive ? `<span class="pill good" style="margin-right:6px">active</span>` : "";
+      return `
+        <div class="row" style="margin-left:12px">
+          <span class="muted">• ${model}</span>
+          <span>
+            ${tag}${pill(p)}
+            <span class="muted" style="margin-left:8px">${t}</span>
+          </span>
+        </div>`;
+    }).join("");
+
     return `
-      <div class="row">
-        <span>${c}</span>
-        <span class="muted">no predictions yet</span>
-      </div>`;
+      <div class="row"><strong>${c}</strong><span></span></div>
+      ${lines}
+    `;
+  }).join("");
+
+  // Scores
+  const sDiv = document.getElementById("scores");
+  if (scores?.ok && (scores.overall || (scores.byCoin && scores.byCoin.length))){
+    const overall = scores.overall
+      ? `<div class="row"><span>Overall</span><span>n=${scores.overall.n} • acc=${fmt(scores.overall.accuracy*100,1)}% • brier=${fmt(scores.overall.brier,4)}</span></div>`
+      : "";
+    const per = (scores.byCoin||[]).map(x =>
+      `<div class="row"><span>${x.coin}</span><span>n=${x.n} • acc=${fmt(x.accuracy*100,1)}% • brier=${fmt(x.brier,4)}</span></div>`
+    ).join("");
+    sDiv.innerHTML = overall + per;
+  } else {
+    sDiv.textContent = "Waiting for first 24h to mature…";
   }
 
-  const activeModel = (window.ACTIVE_MODEL || "v3-macd-bb"); // optional: set via inline script or hardcode here
-
-  const isActive = (model === activeModel);
-const tag = isActive ? `<span class="pill good" style="margin-right:6px">active</span>` : "";
-return `
-  <div class="row" style="margin-left:12px">
-    <span class="muted">• ${model}</span>
-    <span>
-      ${tag}${pill(p)}
-      <span class="muted" style="margin-left:8px">${t}</span>
-    </span>
-  </div>`;
-
-  
-  
-  // sort latest first
-  arr.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
-  const lines = arr.map(row=>{
-    const p = row.p_up;
-    const t = row.ts ? new Date(row.ts).toLocaleString() : "—";
-    const model = row.model_ver || "—";
-    return `
-      <div class="row" style="margin-left:12px">
-        <span class="muted">• ${model}</span>
-        <span>
-          ${pill(p)}
-          <span class="muted" style="margin-left:8px">${t}</span>
-        </span>
-      </div>`;
-  }).join("");
-  return `
-    <div class="row"><strong>${c}</strong><span></span></div>
-    ${lines}
-  `;
-}).join("");
+  document.getElementById("last-upd").textContent = `Last updated: ${new Date().toLocaleString()}`;
+}
 
 
 
