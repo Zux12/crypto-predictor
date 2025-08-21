@@ -102,13 +102,31 @@ app.get("/api/heartbeats", async (_req, res) => {
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
+
+// --- Prices: latest per coin ---
+app.get("/api/prices/latest", async (req, res) => {
+  try {
+    const coins = (req.query.coins || "bitcoin,ethereum")
+      .split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
+
+    const results = {};
+    for (const c of coins) {
+      const row = await Price.findOne({ coin: c }).sort({ ts: -1 }).lean();
+      if (row) results[c] = row;
+    }
+    res.json({ ok: true, results });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: e.message });
+  }
+});
+
+// --- Predictions: latest per coin *per model* (supports ?hours=48 & ?single=true) ---
 app.get("/api/predictions/latest", async (req, res) => {
   try {
     const coins = (req.query.coins || "bitcoin,ethereum")
       .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-    const single = String(req.query.single || "").toLowerCase() === "true";
 
-    // keep last 48h by default
+    const single = String(req.query.single || "").toLowerCase() === "true";
     const hours = Math.max(1, parseInt(req.query.hours || "48", 10));
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
@@ -120,7 +138,9 @@ app.get("/api/predictions/latest", async (req, res) => {
     ]);
 
     const results = Object.fromEntries(coins.map(c => [c, []]));
-    for (const r of rows) results[r.coin].push({ model_ver: r.model_ver, p_up: r.p_up, ts: r.ts });
+    for (const r of rows) {
+      results[r.coin].push({ model_ver: r.model_ver, p_up: r.p_up, ts: r.ts });
+    }
 
     if (single) {
       const collapsed = {};
@@ -138,58 +158,6 @@ app.get("/api/predictions/latest", async (req, res) => {
   }
 });
 
-
-// Latest predictions per coin *per model* (v3, v4, etc.)
-app.get("/api/predictions/latest", async (req, res) => {
-  try {
-    const coins = (req.query.coins || "bitcoin,ethereum")
-      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
-    // Optional: backwards compatibility — if ?single=true, return one row per coin
-    const single = String(req.query.single || "").toLowerCase() === "true";
-
-    // Pull latest doc per (coin, model_ver)
-    const rows = await Prediction.aggregate([
-      { $match: { coin: { $in: coins }, horizon: "24h" } },
-      { $sort: { ts: -1 } },
-      { $group: {
-          _id: { coin: "$coin", model_ver: "$model_ver" },
-          doc: { $first: "$$ROOT" }
-      }},
-      { $project: {
-          _id: 0,
-          coin: "$_id.coin",
-          model_ver: "$_id.model_ver",
-          p_up: "$doc.p_up",
-          ts: "$doc.ts"
-      }}
-    ]);
-
-    // Build { coin: [ {model_ver, p_up, ts}, ... ] }
-    const results = {};
-    for (const c of coins) results[c] = [];
-    for (const r of rows) results[r.coin].push({
-      model_ver: r.model_ver,
-      p_up: r.p_up,
-      ts: r.ts
-    });
-
-    // If single=true, collapse to most recent across models (old behavior)
-    if (single) {
-      const collapsed = {};
-      for (const c of coins) {
-        const arr = results[c] || [];
-        arr.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
-        collapsed[c] = arr[0] || null;
-      }
-      return res.json({ ok: true, results: collapsed });
-    }
-
-    res.json({ ok: true, results });
-  } catch (e) {
-    res.status(500).json({ ok:false, error: e.message });
-  }
-});
 
 
 import Label from "./models/Label.js";
