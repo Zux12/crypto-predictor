@@ -115,7 +115,7 @@ async function load(){
   }
 
   document.getElementById("last-upd").textContent = `Last updated: ${new Date().toLocaleString()}`;
-}
+
 
 document.getElementById("refresh").addEventListener("click", async (e)=>{
   e.target.disabled = true;
