@@ -102,23 +102,42 @@ app.get("/api/heartbeats", async (_req, res) => {
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
-app.get("/api/prices/latest", async (req, res) => {
+app.get("/api/predictions/latest", async (req, res) => {
   try {
     const coins = (req.query.coins || "bitcoin,ethereum")
-      .split(",")
-      .map(s => s.trim().toLowerCase())
-      .filter(Boolean);
+      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    const single = String(req.query.single || "").toLowerCase() === "true";
 
-    const results = {};
-    for (const c of coins) {
-      const row = await Price.findOne({ coin: c }).sort({ ts: -1 }).lean();
-      if (row) results[c] = row;
+    // keep last 48h by default
+    const hours = Math.max(1, parseInt(req.query.hours || "48", 10));
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    const rows = await Prediction.aggregate([
+      { $match: { coin: { $in: coins }, horizon: "24h", ts: { $gte: since } } },
+      { $sort: { ts: -1 } },
+      { $group: { _id: { coin: "$coin", model_ver: "$model_ver" }, doc: { $first: "$$ROOT" } } },
+      { $project: { _id: 0, coin: "$_id.coin", model_ver: "$_id.model_ver", p_up: "$doc.p_up", ts: "$doc.ts" } }
+    ]);
+
+    const results = Object.fromEntries(coins.map(c => [c, []]));
+    for (const r of rows) results[r.coin].push({ model_ver: r.model_ver, p_up: r.p_up, ts: r.ts });
+
+    if (single) {
+      const collapsed = {};
+      for (const c of coins) {
+        const arr = results[c] || [];
+        arr.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
+        collapsed[c] = arr[0] || null;
+      }
+      return res.json({ ok: true, results: collapsed });
     }
+
     res.json({ ok: true, results });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(500).json({ ok:false, error: e.message });
   }
 });
+
 
 // Latest predictions per coin *per model* (v3, v4, etc.)
 app.get("/api/predictions/latest", async (req, res) => {
