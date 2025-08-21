@@ -6,7 +6,7 @@ const MONGO_URI = process.env.MONGO_URI;
 if (!MONGO_URI) { console.error("Missing MONGO_URI"); process.exit(1); }
 
 // Keep the list focused on a few liquid coins
-const COINS = ["bitcoin","ethereum"]; // add "solana" later if desired
+const COINS = ["bitcoin", "ethereum"]; // add "solana" later if desired
 
 // ---------- math helpers ----------
 function ema(values, period) {
@@ -16,14 +16,12 @@ function ema(values, period) {
   for (let i = 1; i < values.length; i++) e = values[i] * k + e * (1 - k);
   return e;
 }
-
 function sma(values, period) {
   if (!values?.length || values.length < period) return null;
   let s = 0;
   for (let i = values.length - period; i < values.length; i++) s += values[i];
   return s / period;
 }
-
 function rsi(close, period = 14) {
   if (!close?.length || close.length <= period) return null;
   let gains = 0, losses = 0;
@@ -43,25 +41,22 @@ function rsi(close, period = 14) {
   const rs = gains / losses;
   return 100 - (100 / (1 + rs));
 }
-
 function stdev(vals) {
   if (!vals?.length || vals.length < 2) return null;
   const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
   const v = vals.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(vals.length-1);
   return Math.sqrt(v);
 }
-
 function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 
 // ---------- data ----------
 async function loadCloses(coin, n = 240) {
-  // fetch the last N closes (10-min cadence; 240 ~ 40 hours)
   const rows = await Price.find({ coin }).sort({ ts: -1 }).limit(n).lean();
   rows.reverse(); // chronological
   return rows.map(r => Number(r.price)).filter(Number.isFinite);
 }
 
-// ---------- feature builders ----------
+// ---------- feature builder ----------
 function buildFeatures(closes) {
   if (!closes || closes.length < 20) return null;
 
@@ -118,27 +113,18 @@ function buildFeatures(closes) {
     bbp = (last - lower) / (upper - lower);
   }
 
-  return { last, r1, ema5, ema20, ema_cross, rsi14, vol2h, macd, macd_signal, macd_hist, sma20, sd20, bbp };
+  return {
+    r1, ema_cross, rsi14, vol2h,
+    macd_hist, bbp,
+    // keep extras for storage/inspection (optional)
+    ema5, ema20, sma20, sd20
+  };
 }
 
-
-
-// ---------- scoring ----------
+// ---------- v3 heuristic scoring (for comparison) ----------
 function scoreToProb(f, debug = false) {
-  // tuned weights (so MACD doesn’t dominate and RSI is gentler)
-  const W = {
-    r1: 80,          // unchanged
-    ema_cross: 5,    // +1 to give trend a touch more say
-    rsi: 0.06,       // ↓ from 0.08 (less drag when RSI<50)
-    macd_hist: 3,    // ↓ from 4 (so it won’t saturate to +1 impact)
-    bbp: 0.7,        // ↓ from 0.8 (slightly softer mean reversion)
-    vol_div: 0.03,   // same
-    vol_cap: 0.5,    // same
-    clip: 6          // same
-  };
-
-  // smoother saturation so extremes compress more
-  const sat = (x, s = 3) => Math.tanh(x / s); // was 2
+  const W = { r1:80, ema_cross:5, rsi:0.06, macd_hist:3, bbp:0.7, vol_div:0.03, vol_cap:0.5, clip:6 };
+  const sat = (x, s = 3) => Math.tanh(x / s);
 
   const r1_sig   = sat((f.r1 ?? 0) * W.r1);
   const ema_sig  = sat((f.ema_cross ?? 0) * W.ema_cross);
@@ -146,7 +132,6 @@ function scoreToProb(f, debug = false) {
   let   macd_sig = sat((f.macd_hist ?? 0) * W.macd_hist);
   const bbp_sig  = (typeof f.bbp === "number") ? sat((f.bbp - 0.5) * 2 * W.bbp) : 0;
 
-  // hard-cap MACD’s impact so it can’t hit ±1 anymore
   const MACD_CAP = 0.8;
   if (macd_sig >  MACD_CAP) macd_sig =  MACD_CAP;
   if (macd_sig < -MACD_CAP) macd_sig = -MACD_CAP;
@@ -157,69 +142,23 @@ function scoreToProb(f, debug = false) {
   raw = Math.max(-W.clip, Math.min(W.clip, raw));
   const p = Number((1 / (1 + Math.exp(-raw))).toFixed(6));
 
-  if (debug) {
-    console.log("scoring components:", { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen, raw, p });
-  }
+  if (debug) console.log("scoring components:", { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen, raw, p });
 
   return { p_up: p, raw_score: raw, components: { r1_sig, ema_sig, rsi_sig, macd_sig, bbp_sig, vol_pen } };
 }
 
-
-function predictLogReg(features){
-  // replace with your trained values
-  const means = [1.42467183e-04,  9.31440186e-04,  5.17405728e+01, -2.67657268e-01, 5.32486170e-01,  4.59951208e-03];
-  const scales = [5.32684168e-03, 8.31257249e-03, 1.21705107e+01, 9.20304426e+01, 3.25832753e-01, 2.68113746e-03];
-  const coefs = [0.05120787,  0.36343205, -0.35128315,  0.09548162, -0.02806779, -0.07244374];
-  const intercept = 0.17018936045733382;
-
-  const xs = [features.r1, features.ema_cross, features.rsi14,
-              features.macd_hist, features.bbp, features.vol2h];
-
-  // standardize
-  const z = xs.map((v,i)=> (v - means[i]) / scales[i]);
-
-  // linear score
-  let s = intercept;
-  for (let i=0; i<coefs.length; i++) s += coefs[i]*z[i];
-
-  // sigmoid → probability
-  return 1 / (1 + Math.exp(-s));
-}
-
-// const p_up = predictLogReg(f);   // instead of simple weights
-// docs.push({
-//  coin,
-//  horizon: "24h",
-//  p_up,
-//  features: f,
-//  model_ver: "v4-ai-logreg",
-//  ts: new Date()
-// });
-
-// after computing features f
-const p_up_v4 = predictLogReg(f);
-await Prediction.create({
-  coin, horizon:"24h", p_up: p_up_v4, features: f, model_ver: "v4-ai-logreg"
-});
-
-// optional: also write the heuristic (v3) for comparison
-const p_up_v3 = /* your previous v3 scoring function */;
-await Prediction.create({
-  coin, horizon:"24h", p_up: p_up_v3, features: f, model_ver: "v3-macd-bb"
-});
-
-
-
-function safeNumber(x, fallback=0){
+// ---------- v4 logistic regression (your trained weights) ----------
+function safeNumber(x, fallback=0) {
   const v = Number(x);
   return Number.isFinite(v) ? v : fallback;
 }
 
-function predictLogReg(features){
-  const means = [/* your means */];
-  const scales = [/* your scales */];
-  const coefs  = [/* your coefs */];
-  const intercept = /* your intercept */;
+function predictLogReg(features) {
+  // validated weights from your coefficients.json (order: r1, ema_cross, rsi14, macd_hist, bbp, vol2h)
+  const means =  [ 1.42467183e-04,  9.31440186e-04,  5.17405728e+01, -2.67657268e-01,  5.32486170e-01,  4.59951208e-03 ];
+  const scales = [ 5.32684168e-03,  8.31257249e-03,  1.21705107e+01,  9.20304426e+01,  3.25832753e-01,  2.68113746e-03 ];
+  const coefs  = [ 0.05120787,  0.36343205, -0.35128315,  0.09548162, -0.02806779, -0.07244374 ];
+  const intercept = 0.17018936045733382;
 
   const xs = [
     safeNumber(features.r1),
@@ -230,68 +169,49 @@ function predictLogReg(features){
     safeNumber(features.vol2h)
   ];
 
-  const z = xs.map((v,i)=>{
+  const z = xs.map((v,i) => {
     const s = scales[i] || 1e-9; // avoid divide-by-zero
     return (v - means[i]) / s;
   });
 
   let s = safeNumber(intercept);
-  for (let i=0; i<coefs.length; i++) s += safeNumber(coefs[i]) * z[i];
+  for (let i = 0; i < coefs.length; i++) s += safeNumber(coefs[i]) * z[i];
 
-  // clip → sigmoid
   const clipped = Math.max(-10, Math.min(10, s));
   return 1 / (1 + Math.exp(-clipped));
 }
 
-
-
+// ---------- main per-coin function ----------
 async function makePredictionForCoin(coin) {
   const closes = await loadCloses(coin, 240);
-  const canFallback = closes && closes.length >= 2;
+  if (!closes || closes.length < 20) return null;
 
-  // Try v3 features
-  if (closes && closes.length >= 20) {
-    const f = buildFeatures(closes);
-    if (f) {
-      const { p_up, raw_score, components } = scoreToProb(f, process.env.PRED_DEBUG === "1");
-      return await Prediction.create({
-        coin,
-        horizon: "24h",
-        p_up,
-        features: {
-          r1: f.r1,
-          ema5: f.ema5, ema20: f.ema20, ema_cross: f.ema_cross,
-          rsi14: f.rsi14, vol2h: f.vol2h,
-          macd: f.macd, macd_signal: f.macd_signal, macd_hist: f.macd_hist,
-          sma20: f.sma20, sd20: f.sd20, bbp: f.bbp,
-          raw_score, components
-        },
-        model_ver: "v3-macd-bb"
-      });
-    }
-  }
+  const f = buildFeatures(closes);
+  if (!f) return null;
 
-  // Fallback (v1 momentum)
-  if (canFallback) {
-    const last = closes[closes.length - 1];
-    const prev = closes[closes.length - 2];
-    const r1 = (last - prev) / prev;
-    const p_up = +sigmoid(r1 * 150).toFixed(6);
+  // v4 (AI) first
+  const p_up_v4 = predictLogReg(f);
+  await Prediction.create({
+    coin, horizon: "24h", p_up: p_up_v4, features: f, model_ver: "v4-ai-logreg"
+  });
 
-    return await Prediction.create({
-      coin,
-      horizon: "24h",
-      p_up,
-      features: { r1 },
-      model_ver: "v1-fallback"
-    });
-  }
+  // v3 (heuristic) for comparison
+  const { p_up: p_up_v3, raw_score, components } = scoreToProb(f, process.env.PRED_DEBUG === "1");
+  const docV3 = await Prediction.create({
+    coin,
+    horizon: "24h",
+    p_up: p_up_v3,
+    features: {
+      ...f,
+      raw_score, components
+    },
+    model_ver: "v3-macd-bb"
+  });
 
-  // Not enough data
-  return null;
+  return { coin, v4: p_up_v4, v3: docV3.p_up };
 }
 
-
+// ---------- runner ----------
 (async () => {
   try {
     await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
@@ -299,9 +219,9 @@ async function makePredictionForCoin(coin) {
     const out = [];
     for (const c of COINS) {
       const r = await makePredictionForCoin(c);
-      if (r) out.push({ coin: r.coin, p_up: r.p_up, f: r.features });
+      if (r) out.push(r);
     }
-    console.log(`[${tsStart.toISOString()}] Forecasted v3:`, out);
+    console.log(`[${tsStart.toISOString()}] Forecasted v3+v4:`, out);
     await mongoose.disconnect();
     process.exit(0);
   } catch (e) {
