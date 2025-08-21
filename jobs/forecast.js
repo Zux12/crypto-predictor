@@ -154,32 +154,23 @@ function safeNumber(x, fallback=0) {
 }
 
 function predictLogReg(features) {
-  // validated weights from your coefficients.json (order: r1, ema_cross, rsi14, macd_hist, bbp, vol2h)
-  const means =  [ 1.42467183e-04,  9.31440186e-04,  5.17405728e+01, -2.67657268e-01,  5.32486170e-01,  4.59951208e-03 ];
-  const scales = [ 5.32684168e-03,  8.31257249e-03,  1.21705107e+01,  9.20304426e+01,  3.25832753e-01,  2.68113746e-03 ];
-  const coefs  = [ 0.05120787,  0.36343205, -0.35128315,  0.09548162, -0.02806779, -0.07244374 ];
+  const means  = [1.42467183e-04, 9.31440186e-04, 5.17405728e+01, -2.67657268e-01, 5.32486170e-01, 4.59951208e-03];
+  const scales = [5.32684168e-03, 8.31257249e-03, 1.21705107e+01, 9.20304426e+01, 3.25832753e-01, 2.68113746e-03];
+  const coefs  = [0.05120787, 0.36343205, -0.35128315, 0.09548162, -0.02806779, -0.07244374];
   const intercept = 0.17018936045733382;
-
   const xs = [
-    safeNumber(features.r1),
-    safeNumber(features.ema_cross),
-    safeNumber(features.rsi14),
-    safeNumber(features.macd_hist),
-    safeNumber(features.bbp),
-    safeNumber(features.vol2h)
+    Number.isFinite(features.r1) ? features.r1 : 0,
+    Number.isFinite(features.ema_cross) ? features.ema_cross : 0,
+    Number.isFinite(features.rsi14) ? features.rsi14 : 50,
+    Number.isFinite(features.macd_hist) ? features.macd_hist : 0,
+    Number.isFinite(features.bbp) ? features.bbp : 0.5,
+    Number.isFinite(features.vol2h) ? features.vol2h : 0
   ];
-
-  const z = xs.map((v,i) => {
-    const s = scales[i] || 1e-9; // avoid divide-by-zero
-    return (v - means[i]) / s;
-  });
-
-  let s = safeNumber(intercept);
-  for (let i = 0; i < coefs.length; i++) s += safeNumber(coefs[i]) * z[i];
-
-  const clipped = Math.max(-10, Math.min(10, s));
-  return 1 / (1 + Math.exp(-clipped));
+  const z = xs.map((v,i)=> (v - means[i]) / (scales[i] || 1e-9));
+  const s = Math.max(-10, Math.min(10, z.reduce((acc, v, i)=> acc + v*coefs[i], intercept)));
+  return 1 / (1 + Math.exp(-s));
 }
+
 
 // ---------- main per-coin function ----------
 async function makePredictionForCoin(coin) {
