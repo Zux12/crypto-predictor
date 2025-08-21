@@ -24,9 +24,14 @@ function feeUSD(notional) { return (notional * FEE_BPS) / 10000; }
 async function getLatestPrice(coin) {
   return Price.findOne({ coin }).sort({ ts: -1 }).lean();
 }
+
+const ACTIVE_MODEL = process.env.PAPER_MODEL_VER || "v3-macd-bb";
+
 async function getLatestPred(coin) {
-  return Prediction.findOne({ coin, horizon: "24h" }).sort({ ts: -1 }).lean();
+  return Prediction.findOne({ coin, horizon: "24h", model_ver: ACTIVE_MODEL })
+    .sort({ ts: -1 }).lean();
 }
+
 
 async function ensureState() {
   let s = await PaperState.findById("default");
