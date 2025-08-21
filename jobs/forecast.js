@@ -165,7 +165,36 @@ function scoreToProb(f, debug = false) {
 }
 
 
+function predictLogReg(features){
+  // replace with your trained values
+  const means = [1.42467183e-04,  9.31440186e-04,  5.17405728e+01, -2.67657268e-01, 5.32486170e-01,  4.59951208e-03];
+  const scales = [5.32684168e-03, 8.31257249e-03, 1.21705107e+01, 9.20304426e+01, 3.25832753e-01, 2.68113746e-03];
+  const coefs = [0.05120787,  0.36343205, -0.35128315,  0.09548162, -0.02806779, -0.07244374];
+  const intercept = 0.17018936045733382;
 
+  const xs = [features.r1, features.ema_cross, features.rsi14,
+              features.macd_hist, features.bbp, features.vol2h];
+
+  // standardize
+  const z = xs.map((v,i)=> (v - means[i]) / scales[i]);
+
+  // linear score
+  let s = intercept;
+  for (let i=0; i<coefs.length; i++) s += coefs[i]*z[i];
+
+  // sigmoid → probability
+  return 1 / (1 + Math.exp(-s));
+}
+
+const p_up = predictLogReg(f);   // instead of simple weights
+docs.push({
+  coin,
+  horizon: "24h",
+  p_up,
+  features: f,
+  model_ver: "v4-ai-logreg",
+  ts: new Date()
+});
 
 
 async function makePredictionForCoin(coin) {
