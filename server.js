@@ -7,6 +7,9 @@ import PaperTrade from "./models/PaperTrade.js";
 import Equity from "./models/Equity.js";
 import cors from "cors";
 import equityRoute from "./routes/equity.js";
+import tradesRoute from "./routes/trades.js";
+app.use("/api/trades", tradesRoute);
+
 
 
 // Heroku provides env vars automatically.
