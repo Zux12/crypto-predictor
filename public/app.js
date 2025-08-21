@@ -41,23 +41,38 @@ async function load(){
     return `<div class="row"><span>${c}</span><strong>$${fmt(row?.price, 2)}</strong></div>`;
   }).join("");
 
-// Predictions (with model_ver)
+// Predictions (show multiple models per coin)
 const prDiv = document.getElementById("preds");
 prDiv.innerHTML = coins.map(c=>{
-  const row = preds.results?.[c];
-  const p = row?.p_up;
-  const t = row?.ts ? new Date(row.ts).toLocaleString() : "—";
-  const model = row?.model_ver || "—";
+  const arr = preds.results?.[c] || []; // array of {model_ver, p_up, ts}
+  if (!arr.length) {
+    return `
+      <div class="row">
+        <span>${c}</span>
+        <span class="muted">no predictions yet</span>
+      </div>`;
+  }
+  // sort latest first
+  arr.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
+  const lines = arr.map(row=>{
+    const p = row.p_up;
+    const t = row.ts ? new Date(row.ts).toLocaleString() : "—";
+    const model = row.model_ver || "—";
+    return `
+      <div class="row" style="margin-left:12px">
+        <span class="muted">• ${model}</span>
+        <span>
+          ${pill(p)}
+          <span class="muted" style="margin-left:8px">${t}</span>
+        </span>
+      </div>`;
+  }).join("");
   return `
-    <div class="row">
-      <span>${c}</span>
-      <span>
-        ${pill(p)}
-        <span class="muted" style="margin-left:8px">${t}</span>
-        <span class="muted" style="margin-left:8px">(${model})</span>
-      </span>
-    </div>`;
+    <div class="row"><strong>${c}</strong><span></span></div>
+    ${lines}
+  `;
 }).join("");
+
 
 
   // Scores
