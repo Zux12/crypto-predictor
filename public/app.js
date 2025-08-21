@@ -132,6 +132,7 @@ async function load(){
     }
   }
   await loadEquity();
+  await loadTrades();
 }
 
 
@@ -288,6 +289,59 @@ function svgLine(points, width=600, height=120, pad=6){
     ${dots}
   </svg>`;
 }
+
+// ===== Recent Trades =====
+async function loadTrades() {
+  const tDiv = document.getElementById("trades");
+  if (!tDiv) return;
+
+  try {
+    const data = await fetchJSON("/api/trades/recent?limit=20");
+    if (!data?.ok) {
+      tDiv.textContent = "Failed to load trades.";
+      return;
+    }
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) {
+      tDiv.textContent = "No trades yet.";
+      return;
+    }
+
+    tDiv.innerHTML = rows.map(r => {
+      const ts = r.ts ? new Date(r.ts).toLocaleString() : "—";
+      const side = (r.side || r.type || "").toUpperCase(); // depending on your schema field name
+      const coin = r.coin?.toUpperCase?.() || r.coin || "—";
+      const qty = r.qty != null ? Number(r.qty) : null;
+      const price = r.price != null ? Number(r.price) : null;
+      const fee = r.fee_usd != null ? Number(r.fee_usd) : 0;
+      const pnl = r.pnl_usd != null ? Number(r.pnl_usd) : null;
+
+      const sidePill = side === "BUY"
+        ? `<span class="pill good">BUY</span>`
+        : side === "SELL"
+          ? `<span class="pill bad">SELL</span>`
+          : `<span class="pill">${side || "—"}</span>`;
+
+      const right = [
+        qty != null ? `${qty.toFixed(6)}` : null,
+        price != null ? `$${fmt(price,2)}` : null,
+        fee ? `fee $${fmt(fee,2)}` : null,
+        pnl != null ? `PnL $${fmt(pnl,2)}` : null
+      ].filter(Boolean).join(" • ");
+
+      return `
+        <div class="row">
+          <span>${sidePill} ${coin} <span class="muted" style="margin-left:8px">${ts}</span></span>
+          <span>${right}</span>
+        </div>
+      `;
+    }).join("");
+
+  } catch {
+    tDiv.textContent = "Failed to load trades.";
+  }
+}
+
 
 async function loadMonitoring(){
   // calibration (30d, 10 bins, all coins)
