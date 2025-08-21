@@ -13,6 +13,8 @@ import metricsRoute from "./routes/metrics.js";
 app.use("/api", metricsRoute); // exposes /api/calibration/last30d and /api/accuracy/trend
 import labelsRoute from "./routes/labels.js";
 app.use("/api/labels", labelsRoute);
+import byModelRoute from "./routes/bymodel.js";
+app.use("/api", byModelRoute); // exposes /api/scores/by-model
 
 
 
