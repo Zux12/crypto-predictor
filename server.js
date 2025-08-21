@@ -6,6 +6,8 @@ import PaperState from "./models/PaperState.js";
 import PaperTrade from "./models/PaperTrade.js";
 import Equity from "./models/Equity.js";
 import cors from "cors";
+import equityRoute from "./routes/equity.js";
+
 
 // Heroku provides env vars automatically.
 // Locally, create a .env with MONGO_URI, JWT_SECRET, TIMEZONE.
@@ -55,6 +57,9 @@ app.get("/api/scores/by_model", async (req, res) => {
 
 // Serve static files (dashboard shell)
 app.use(express.static("public"));
+
+app.use("/api/equity", equityRoute);
+
 
 // Health endpoint (no secrets)
 app.get("/health", (req, res) => {
