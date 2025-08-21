@@ -133,6 +133,8 @@ async function load(){
   }
   await loadEquity();
   await loadTrades();
+  await loadCalibration();
+  await loadAccuracyTrend();
 }
 
 
@@ -339,6 +341,77 @@ async function loadTrades() {
 
   } catch {
     tDiv.textContent = "Failed to load trades.";
+  }
+}
+
+
+// ===== Calibration (last 30d) =====
+async function loadCalibration() {
+  const el = document.getElementById("calibration");
+  if (!el) return;
+
+  try {
+    const data = await fetchJSON("/api/calibration/last30d");
+    if (!data?.ok) { el.textContent = "Failed to load."; return; }
+    const buckets = Array.isArray(data.buckets) ? data.buckets : [];
+    if (!buckets.length) { el.textContent = "Waiting for labels…"; return; }
+
+    // Render as simple list: expected vs realized
+    el.innerHTML = buckets.map(b => {
+      const expected = (b.p_mid * 100).toFixed(0) + "%";
+      const realized = (b.realized * 100).toFixed(0) + "%";
+      return `<div class="row">
+        <span>${(b.p_mid).toFixed(2)} bin (${expected})</span>
+        <span>realized ${realized} • n=${b.n}</span>
+      </div>`;
+    }).join("");
+  } catch {
+    el.textContent = "Failed to load.";
+  }
+}
+
+// ===== Accuracy Trend (last 30d) =====
+async function loadAccuracyTrend() {
+  const el = document.getElementById("acc-trend");
+  if (!el) return;
+
+  try {
+    const data = await fetchJSON("/api/accuracy/trend?days=30");
+    if (!data?.ok) { el.textContent = "Failed to load."; return; }
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) { el.textContent = "Waiting for labels…"; return; }
+
+    // Group by model for display
+    const byModel = {};
+    for (const r of rows) {
+      const k = r._id?.model || "unknown";
+      if (!byModel[k]) byModel[k] = [];
+      byModel[k].push({ d: r._id?.d, acc: r.acc, brier: r.brier, n: r.n });
+    }
+
+    // Render: each model shows most recent 7 points as a tiny ASCII line
+    const chars = "▁▂▃▄▅▆▇█";
+    const blocks = Object.entries(byModel).map(([model, arr]) => {
+      const last = arr.slice(-7);
+      const vals = last.map(x => x.acc || 0);
+      const min = Math.min(...vals), max = Math.max(...vals);
+      const scale = (max - min) || 1;
+      const spark = vals.map(v => {
+        const idx = Math.floor(((v - min) / scale) * (chars.length - 1));
+        return chars[idx];
+      }).join("");
+      const tail = last.at(-1);
+      const tailTxt = tail ? `acc ${(tail.acc*100).toFixed(1)}% • brier ${tail.brier?.toFixed(3)} • n=${tail.n}` : "";
+      return `
+        <div class="row">
+          <span class="muted">${model}</span>
+          <span>${spark} <span class="muted" style="margin-left:8px">${tailTxt}</span></span>
+        </div>`;
+    }).join("");
+
+    el.innerHTML = blocks || "No data";
+  } catch {
+    el.textContent = "Failed to load.";
   }
 }
 
