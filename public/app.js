@@ -52,6 +52,22 @@ prDiv.innerHTML = coins.map(c=>{
         <span class="muted">no predictions yet</span>
       </div>`;
   }
+
+  const activeModel = (window.ACTIVE_MODEL || "v3-macd-bb"); // optional: set via inline script or hardcode here
+
+  const isActive = (model === activeModel);
+const tag = isActive ? `<span class="pill good" style="margin-right:6px">active</span>` : "";
+return `
+  <div class="row" style="margin-left:12px">
+    <span class="muted">• ${model}</span>
+    <span>
+      ${tag}${pill(p)}
+      <span class="muted" style="margin-left:8px">${t}</span>
+    </span>
+  </div>`;
+
+  
+  
   // sort latest first
   arr.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
   const lines = arr.map(row=>{
