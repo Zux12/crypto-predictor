@@ -96,6 +96,42 @@ async function load(){
   }
 
   document.getElementById("last-upd").textContent = `Last updated: ${new Date().toLocaleString()}`;
+
+   // ===== Equity (summary + chart) =====
+  async function loadEquity() {
+    try {
+      const eqDiv = document.getElementById("equity-summary");
+      const chartDiv = document.getElementById("equity-chart");
+      if (!eqDiv || !chartDiv) return;
+
+      const summary = await fetchJSON("/api/equity/summary");
+      if (summary?.ok) {
+        const eq = Number(summary.equity_usd) || 0;
+        const cash = Number(summary.cash_usd) || 0;
+        eqDiv.textContent = `💰 $${fmt(eq,2)} (cash $${fmt(cash,2)})`;
+      } else {
+        eqDiv.textContent = "Error loading equity";
+      }
+
+      const series = await fetchJSON("/api/equity/series?days=7");
+      if (series?.ok && Array.isArray(series.rows) && series.rows.length) {
+        const vals = series.rows.map(r => Number(r.equity_usd) || 0);
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const chars = "▁▂▃▄▅▆▇█";
+        const scale = (max - min) || 1;
+        chartDiv.textContent = vals.map(v => {
+          const idx = Math.floor(((v - min) / scale) * (chars.length - 1));
+          return chars[idx];
+        }).join("");
+      } else {
+        chartDiv.textContent = "No data";
+      }
+    } catch {
+      const eqDiv = document.getElementById("equity-summary");
+      if (eqDiv) eqDiv.textContent = "Failed to load equity";
+    }
+  }
+  await loadEquity();
 }
 
 
