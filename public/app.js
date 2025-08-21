@@ -135,6 +135,7 @@ async function load(){
   await loadTrades();
   await loadCalibration();
   await loadAccuracyTrend();
+  await loadLabels();   // <-- add this
 }
 
 
@@ -341,6 +342,51 @@ async function loadTrades() {
 
   } catch {
     tDiv.textContent = "Failed to load trades.";
+  }
+}
+
+// ===== Latest Labels =====
+async function loadLabels() {
+  const el = document.getElementById("labels-card");
+  if (!el) return;
+
+  try {
+    const data = await fetchJSON("/api/labels/latest?limit=50");
+    if (!data?.ok) { el.textContent = "Failed to load labels."; return; }
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) { el.textContent = "Waiting for first 24h to mature…"; return; }
+
+    el.innerHTML = rows.map(r => {
+      const t0 = r.ts ? new Date(r.ts).toLocaleString() : "—";
+      const tl = r.labeled_at ? new Date(r.labeled_at).toLocaleString() : "—";
+      const coin = (r.coin || "").toUpperCase();
+      const model = r.model_ver || "—";
+      const prob = (Number(r.p_up) || 0);
+      const brier = (r.brier != null) ? r.brier.toFixed(3) : "—";
+      const p0 = (r.price_t0 != null) ? `$${fmt(r.price_t0,2)}` : "—";
+      const p1 = (r.price_t1 != null) ? `$${fmt(r.price_t1,2)}` : "—";
+      const corr = r.correct === true ? "✅" : r.correct === false ? "❌" : "—";
+      const pillCls = r.correct === true ? "pill good" : r.correct === false ? "pill bad" : "pill";
+
+      return `
+        <div class="row">
+          <span>
+            <strong>${coin}</strong>
+            <span class="muted" style="margin-left:6px">${model}</span>
+            <span class="muted" style="margin-left:8px">${t0} → ${tl}</span>
+          </span>
+          <span>
+            <span class="${pillCls}" title="correct?">${corr}</span>
+            <span class="muted" style="margin-left:8px">P↑ ${fmt(prob*100,1)}%</span>
+            <span class="muted" style="margin-left:8px">Brier ${brier}</span>
+            <span class="muted" style="margin-left:8px">${p0} → ${p1}</span>
+          </span>
+        </div>
+      `;
+    }).join("");
+
+  } catch {
+    el.textContent = "Failed to load labels.";
   }
 }
 
