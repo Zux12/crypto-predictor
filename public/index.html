@@ -96,6 +96,32 @@
   <div id="pnl-card">Loading…</div>
 </div>
 
+  <div class="card">
+  <h2>Model Simulator (PnL)</h2>
+  <div class="muted" style="margin-bottom:8px">
+    Compare v3 vs v4 on labeled history. Returns are unit‑notional, long‑only, net of fee.
+  </div>
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px">
+    <label class="muted">Days
+      <input id="sim-days" type="number" value="60" min="7" max="365" style="width:80px; margin-left:6px">
+    </label>
+    <label class="muted">Fee (bps)
+      <input id="sim-fee" type="number" value="10" min="0" max="200" style="width:80px; margin-left:6px">
+    </label>
+    <label class="muted">Sweep
+      <input id="sim-lo" type="number" value="0.50" step="0.01" min="0" max="1" style="width:80px; margin-left:6px">
+      →
+      <input id="sim-hi" type="number" value="0.70" step="0.01" min="0" max="1" style="width:80px; margin-left:6px">
+      step
+      <input id="sim-step" type="number" value="0.01" step="0.005" min="0.001" max="0.1" style="width:80px; margin-left:6px">
+    </label>
+    <button id="sim-run" class="btn">Run</button>
+  </div>
+
+  <div id="sim-output" class="muted">Set params and click Run.</div>
+</div>
+
   
   <script src="/app.js"></script>
 </body>
