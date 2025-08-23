@@ -535,67 +535,49 @@ function _mean(a){ return a.length ? a.reduce((s,v)=>s+v,0)/a.length : 0; }
 app.get("/api/sim/pnl", async (req, res) => {
   try {
     const models = String(req.query.models || "v3-macd-bb,v4-ai-logreg")
-      .split(",").map(s=>s.trim()).filter(Boolean);
-    const coins  = String(req.query.coins || "bitcoin,ethereum")
-      .split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
-    const days   = Math.min(Math.max(parseInt(req.query.days || "60",10), 1), 365);
-    const feeBps = Math.min(Math.max(parseInt(req.query.fee_bps || "10",10), 0), 200);
+      .split(",").map(s => s.trim()).filter(Boolean);
+
+    const coins = String(req.query.coins || "bitcoin,ethereum")
+      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+
+    const days   = Math.min(Math.max(parseInt(req.query.days || "60", 10), 1), 365);
+    const feeBps = Math.min(Math.max(parseInt(req.query.fee_bps || "10", 10), 0), 200);
     const lo     = Math.max(0, Number(req.query.lo ?? 0.50));
     const hi     = Math.min(1, Number(req.query.hi ?? 0.70));
     const step   = Math.min(Math.max(Number(req.query.step ?? 0.01), 0.001), 0.1);
 
-    const since = new Date(Date.now() - days*24*60*60*1000);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const fee   = feeBps / 10000;
 
-    // build sweep thresholds
+    // Build sweep thresholds
     const taus = [];
     for (let t = lo; t <= hi + 1e-12; t += step) taus.push(Number(t.toFixed(4)));
 
-    const out = { ok:true, days, fee_bps: feeBps, coins, models, lo, hi, step, results: [] };
+    const out = { ok: true, days, fee_bps: feeBps, coins, models, lo, hi, step, results: [] };
 
     for (const coin of coins) {
       for (const model of models) {
-        // labeled rows only: join predictions -> labels
-
-
-// Pull labeled rows in window, then join to predictions to get model_ver (and prob if needed)
-const rows = await Label.aggregate([
-  { $match: { coin, horizon: "24h", labeled_at: { $gte: since } } },
-  {
-    $lookup: {
-      from: Prediction.collection.name,   // use actual collection name (avoids pluralization issues)
-      localField: "pred_id",
-      foreignField: "_id",
-      as: "pred"
-    }
-  },
-  { $unwind: "$pred" },
-  { $match: { "pred.model_ver": model } },  // <- select v3 or v4 here
-  {
-    $project: {
-      _id: 0,
-      ts: "$pred.ts",
-      // Your Label docs also have p_up; prefer pred.p_up, fallback to label p_up if present
-      p_up: { $ifNull: [ "$pred.p_up", "$p_up" ] },
-      realized_ret: "$realized_ret"
-    }
-  },
-  { $sort: { ts: 1 } }
-]);
-
-
-
+        // Pull labeled predictions for this coin+model within window (no $lookup needed)
+        const rows = await Prediction.find({
+          coin,
+          horizon: "24h",
+          model_ver: model,
+          labeled_at: { $gte: since }
+        })
+        .sort({ ts: 1 })
+        .select({ _id: 0, ts: 1, p_up: 1, realized_ret: 1 })
+        .lean();
 
         const grid = [];
-        let best = { tau: null, n:0, hit:0, avg:0, sum:0 };
+        let best = { tau: null, n: 0, hit: 0, avg: 0, sum: 0 };
 
         for (const tau of taus) {
-          const picks = rows.filter(r => r.p_up >= tau);
+          const picks = rows.filter(r => Number(r.p_up) >= tau);
           const n = picks.length;
-          const rets = picks.map(r => (r.realized_ret || 0) - fee);
-          const sum = rets.reduce((s,v)=>s+v,0);
+          const rets = picks.map(r => (Number(r.realized_ret) || 0) - fee);
+          const sum = rets.reduce((s, v) => s + v, 0);
           const avg = _mean(rets);
-          const hit = n ? picks.filter(r => (r.realized_ret||0) > 0).length / n : 0;
+          const hit = n ? picks.filter(r => (Number(r.realized_ret) || 0) > 0).length / n : 0;
 
           grid.push({ tau, n, hit, avg, sum });
 
@@ -606,18 +588,21 @@ const rows = await Label.aggregate([
         }
 
         out.results.push({
-          coin, model, labeled: rows.length,
+          coin, model,
+          labeled: rows.length,
           best,
-          grid: grid.length > 60 ? grid.filter((_,i)=> i%Math.ceil(grid.length/60)===0) : grid
+          // keep payload compact (≤ ~60 points)
+          grid: grid.length > 60 ? grid.filter((_, i) => i % Math.ceil(grid.length / 60) === 0) : grid
         });
       }
     }
 
     res.json(out);
   } catch (e) {
-    res.status(500).json({ ok:false, error: e.message || String(e) });
+    res.status(500).json({ ok: false, error: e.message || String(e) });
   }
 });
+
 
 
 
