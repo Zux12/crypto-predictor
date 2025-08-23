@@ -529,7 +529,7 @@ app.get("/api/export/backfill.csv", async (req, res) => {
   }
 });
 
-// ---- PnL Simulator: v3 vs v4 (inline, robust via Label -> Prediction) ----
+// ---- PnL Simulator: v3 vs v4 (inline, use Label.pred_ts window) ----
 function _mean(a){ return a.length ? a.reduce((s,v)=>s+v,0)/a.length : 0; }
 
 app.get("/api/sim/pnl", async (req, res) => {
@@ -556,26 +556,24 @@ app.get("/api/sim/pnl", async (req, res) => {
 
     for (const coin of coins) {
       for (const model of models) {
-
-        // Pull labeled rows in window from Label, then join Prediction to get model_ver & p_up
+        // Pull labeled rows from Label using the SAME window your scores use: pred_ts >= since
         const rows = await Label.aggregate([
-          { $match: { coin, horizon: "24h", labeled_at: { $gte: since } } },
+          { $match: { coin, horizon: "24h", pred_ts: { $gte: since } } },
           {
             $lookup: {
-              from: Prediction.collection.name,   // actual collection name
+              from: Prediction.collection.name,       // join to get model_ver & pred p_up
               localField: "pred_id",
               foreignField: "_id",
               as: "pred"
             }
           },
           { $unwind: "$pred" },
-          { $match: { "pred.model_ver": model } },           // filter model here
+          { $match: { "pred.model_ver": model } },   // select v3 / v4 here
           {
             $project: {
               _id: 0,
               ts: "$pred.ts",
-              // prefer pred.p_up, fallback to label.p_up if present
-              p_up: { $ifNull: ["$pred.p_up", "$p_up"] },
+              p_up: { $ifNull: [ "$pred.p_up", "$p_up" ] },  // prefer pred.p_up; fallback to label.p_up
               realized_ret: "$realized_ret"
             }
           },
@@ -614,6 +612,7 @@ app.get("/api/sim/pnl", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message || String(e) });
   }
 });
+
 
 
 
