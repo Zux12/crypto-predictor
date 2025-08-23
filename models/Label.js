@@ -31,7 +31,7 @@ const LabelSchema = new mongoose.Schema(
 );
 
 // --- Indexes ---
-LabelSchema.index({ pred_id: 1 }, { unique: true });                       // one label per pred
+// LabelSchema.index({ pred_id: 1 }, { unique: true });                       // one label per pred
 LabelSchema.index({ coin: 1, horizon: 1, model_ver: 1, pred_ts: -1 });     // common filters
 LabelSchema.index({ labeled_at: -1 });                                     // recency queries
 LabelSchema.index({ coin: 1, pred_ts: -1 });                                // quick coin streams
