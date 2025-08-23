@@ -122,26 +122,32 @@ function brierScore(p_up, label_up) {
         labeled_at: new Date()
       });
 
-      // Update the Prediction with outcomes
-      await Prediction.updateOne(
-        { _id: pred._id },
-        {
-          $set: {
-            labeled_at: new Date(),
-            label_up,
-            realized_ret,
-            price_t0: price0,
-            price_t1: price1,
-            brier,
-            correct
-          }
-        }
-      );
+// Update the Prediction with outcome fields
+const upd = await Prediction.updateOne(
+  { _id: pred._id },
+  {
+    $set: {
+      labeled_at: new Date(),
+      label_up,
+      realized_ret,
+      price_t0: price0,
+      price_t1: price1,
+      brier,
+      correct
+    }
+  }
+);
 
+// Optional: warn if nothing was modified (should be 1)
+if ((upd.modifiedCount ?? upd.nModified ?? 0) === 0) {
+  console.warn("WARN: prediction not updated", { id: pred._id.toString(), model: pred.model_ver });
+}
+      
       labeledCount++;
       if (resultsPreview.length < 5) {
         resultsPreview.push({
           coin: pred.coin,
+          model_ver: pred.model_ver,     // <— add model tag for visibility
           ts: pred.ts,
           p_up: Number(pred.p_up),
           label_up,
