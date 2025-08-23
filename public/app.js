@@ -573,6 +573,71 @@ async function loadPnL(){
   }
 }
 
+function pct(x, d=2){ return (x*100).toFixed(d) + "%"; }
+function fmtN(x){ return (x||0).toLocaleString(); }
+
+async function runSimulator() {
+  const out = document.getElementById("sim-output");
+  if (!out) return;
+  out.textContent = "Running…";
+
+  const days = Number(document.getElementById("sim-days").value || 60);
+  const fee  = Number(document.getElementById("sim-fee").value || 10);
+  const lo   = Number(document.getElementById("sim-lo").value || 0.50);
+  const hi   = Number(document.getElementById("sim-hi").value || 0.70);
+  const step = Number(document.getElementById("sim-step").value || 0.01);
+
+  try {
+    const q = new URLSearchParams({
+      models: "v3-macd-bb,v4-ai-logreg",
+      coins: (typeof coins !== "undefined" ? coins.join(",") : "bitcoin,ethereum"),
+      days: String(days),
+      fee_bps: String(fee),
+      lo: String(lo),
+      hi: String(hi),
+      step: String(step)
+    }).toString();
+
+    const j = await fetchJSON(`/api/sim/pnl?${q}`);
+    if (!j?.ok) { out.textContent = "Simulator failed."; return; }
+
+    // Build a compact table
+    const rows = j.results || [];
+    if (!rows.length) { out.textContent = "No labeled data yet."; return; }
+
+    // Group by coin
+    const byCoin = {};
+    for (const r of rows) {
+      if (!byCoin[r.coin]) byCoin[r.coin] = [];
+      byCoin[r.coin].push(r);
+    }
+
+    let html = `<div class="muted">Window: ${j.days}d • Fee: ${j.fee_bps}bps • Sweep: ${j.lo}→${j.hi} step ${j.step}</div>`;
+    for (const [coin, arr] of Object.entries(byCoin)) {
+      html += `<h3 style="margin-top:8px">${coin.toUpperCase()}</h3>
+        <div class="row" style="font-weight:600"><span>Model</span><span>Best τ • Trades • Hit • Avg/trade • Sum</span></div>`;
+      for (const r of arr) {
+        const b = r.best || {};
+        const tag = (b && b.tau != null && b.n >= 30)
+          ? `τ=${b.tau.toFixed(2)} • n=${fmtN(b.n)} • hit=${pct(b.hit,1)} • avg=${pct(b.avg,3)} • sum=${pct(b.sum,2)}`
+          : `insufficient data (labeled=${fmtN(r.labeled)})`;
+        html += `<div class="row"><span>${r.model}</span><span>${tag}</span></div>`;
+      }
+    }
+
+    out.innerHTML = html;
+  } catch (e) {
+    out.textContent = "Simulator error.";
+    console.error("[sim]", e);
+  }
+}
+
+// Hook up the button once at startup
+document.addEventListener("DOMContentLoaded", ()=>{
+  const btn = document.getElementById("sim-run");
+  if (btn) btn.addEventListener("click", runSimulator);
+});
+
 
 // ---- override load() ONCE, then call it + schedule auto-refresh ----
 const originalLoad = load;
