@@ -162,7 +162,7 @@ if (resultsPreview.length < 5) {
     label_up, brier: +brier.toFixed(6), correct
   });
 }
-if (matched === 0) {
+if (matched === 0 && modified === 0) {
   console.warn("WARN: prediction not found/unlabeled at update time", {
     id: pred._id.toString(), model: pred.model_ver
   });
