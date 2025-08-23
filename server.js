@@ -556,22 +556,19 @@ app.get("/api/sim/pnl", async (req, res) => {
     for (const coin of coins) {
       for (const model of models) {
         // labeled rows only: join predictions -> labels
-// Use label time window (labeled_at >= since) and the actual collection name
-const rows = await Prediction.aggregate([
-  { $match: { coin, horizon: "24h", model_ver: model } },
-  { $sort:  { ts: 1 } },
-  {
-    $lookup: {
-      from: Label.collection.name,     // <-- avoids hard-coding "labels"
-      localField: "_id",
-      foreignField: "pred_id",
-      as: "lab"
-    }
-  },
-  { $unwind: "$lab" },
-  { $match: { "lab.labeled_at": { $gte: since } } }, // <-- window by label time
-  { $project: { _id:0, ts:1, p_up:1, realized_ret: "$lab.realized_ret" } }
+
+// new way: pull straight from Label collection
+const rows = await Label.aggregate([
+  { $match: { coin, horizon: "24h", model_ver: model, labeled_at: { $gte: since } } },
+  { $sort: { pred_ts: 1 } },
+  { $project: {
+      _id: 0,
+      ts: "$pred_ts",
+      p_up: "$p_up",
+      realized_ret: "$realized_ret"
+  } }
 ]);
+
 
 
         const grid = [];
