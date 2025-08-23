@@ -20,6 +20,10 @@ import metricsRoute from "./routes/metrics.js";
 // import byModelRoute from "./routes/bymodel.js";
 import labelsRoute from "./routes/labels.js";
 
+import simRoute from "./routes/sim.js";
+app.use("/api/sim", simRoute); // exposes /api/sim/pnl
+
+
 // ---- Env / constants ----
 const PORT = process.env.PORT || 10000;
 const MONGO_URI = process.env.MONGO_URI;
