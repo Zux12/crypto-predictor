@@ -20,8 +20,8 @@ import metricsRoute from "./routes/metrics.js";
 // import byModelRoute from "./routes/bymodel.js";
 import labelsRoute from "./routes/labels.js";
 
-import simRoute from "./routes/sim.js";
-app.use("/api/sim", simRoute); // exposes /api/sim/pnl
+// import simRoute from "./routes/sim.js";
+// app.use("/api/sim", simRoute); // exposes /api/sim/pnl
 
 
 // ---- Env / constants ----
