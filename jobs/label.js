@@ -104,27 +104,38 @@ function brierScore(p_up, label_up) {
       const brier        = brierScore(pred.p_up, label_up);
       const correct      = ((Number(pred.p_up) || 0) >= 0.5) === label_up;
 
-      // Audit row in Label collection
-      await Label.create({
-        pred_id:    pred._id,
-        coin:       pred.coin,
-        horizon:    pred.horizon || "24h",
-        model_ver:  pred.model_ver || null, // keep the true model
-        pred_ts:    t0,
-        eval_ts:    t1,
-        p_up:       pred.p_up,
-        price_t0:   price0,
-        price_t1:   price1,
-        realized_ret,
-        label_up,
-        brier,
-        correct,
-        labeled_at: new Date()
-      });
+// 1) Upsert the audit row (prevents duplicates if you re-run)
+await Label.updateOne(
+  { pred_id: pred._id },
+  {
+    $setOnInsert: {
+      pred_id:    pred._id,
+      coin:       pred.coin,
+      horizon:    pred.horizon || "24h",
+      model_ver:  pred.model_ver || null,
+      pred_ts:    t0,
+      eval_ts:    t1
+    },
+    $set: {
+      p_up:       pred.p_up,
+      price_t0:   price0,
+      price_t1:   price1,
+      realized_ret,
+      label_up,
+      brier,
+      correct,
+      labeled_at: new Date()
+    }
+  },
+  { upsert: true }
+);
 
-// Update the Prediction with outcome fields
+// 2) Only update predictions that are still unlabeled
 const upd = await Prediction.updateOne(
-  { _id: pred._id },
+  {
+    _id: pred._id,
+    $or: [ { labeled_at: { $exists: false } }, { labeled_at: null } ]
+  },
   {
     $set: {
       labeled_at: new Date(),
@@ -137,6 +148,26 @@ const upd = await Prediction.updateOne(
     }
   }
 );
+
+// Log smarter: OK if matched but no modify (already had same values)
+const matched = (upd.matchedCount ?? upd.n) || 0;
+const modified = (upd.modifiedCount ?? upd.nModified) || 0;
+if (resultsPreview.length < 5) {
+  resultsPreview.push({
+    coin: pred.coin,
+    model_ver: pred.model_ver,
+    ts: pred.ts,
+    matched, modified,
+    p_up: Number(pred.p_up),
+    label_up, brier: +brier.toFixed(6), correct
+  });
+}
+if (matched === 0) {
+  console.warn("WARN: prediction not found/unlabeled at update time", {
+    id: pred._id.toString(), model: pred.model_ver
+  });
+}
+
 
 // Optional: warn if nothing was modified (should be 1)
 if ((upd.modifiedCount ?? upd.nModified ?? 0) === 0) {
