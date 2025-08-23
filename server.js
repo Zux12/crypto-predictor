@@ -559,14 +559,30 @@ app.get("/api/sim/pnl", async (req, res) => {
 
 // new way: pull straight from Label collection
 const rows = await Label.aggregate([
-  { $match: { coin, horizon: "24h", model_ver: model, labeled_at: { $gte: since } } },
-  { $sort: { pred_ts: 1 } },
-  { $project: {
+  // use label time window; restrict to coin + 24h horizon
+  { $match: { coin, horizon: "24h", labeled_at: { $gte: since } } },
+  // join to predictions to get model_ver (and p_up if needed)
+  {
+    $lookup: {
+      from: Prediction.collection.name,   // use actual collection name
+      localField: "pred_id",
+      foreignField: "_id",
+      as: "pred"
+    }
+  },
+  { $unwind: "$pred" },
+  // keep only the model we're simulating
+  { $match: { "pred.model_ver": model } },
+  // simulator needs prob + realized return (and a ts for ordering)
+  {
+    $project: {
       _id: 0,
-      ts: "$pred_ts",
-      p_up: "$p_up",
+      ts: "$pred.ts",
+      p_up: { $ifNull: ["$pred.p_up", "$p_up"] },
       realized_ret: "$realized_ret"
-  } }
+    }
+  },
+  { $sort: { ts: 1 } }
 ]);
 
 
