@@ -1,18 +1,27 @@
 import mongoose from "mongoose";
-const { Schema } = mongoose;
 
-const PredictionSchema = new Schema({
-  ts:        { type: Date, default: Date.now, index: true },
-  coin:      { type: String, required: true, index: true },
-  horizon:   { type: String, default: "24h", index: true },
-  p_up:      { type: Number, required: true },
+const PredictionSchema = new mongoose.Schema(
+  {
+    coin: { type: String, index: true },
+    model_ver: { type: String, index: true },
+    ts: { type: Date, index: true },
+    horizon: { type: String, default: "24h" },
+    prob_up: { type: Number },
 
-  // Allow arbitrary nested fields under features (indicators, components, debug, etc.)
-  features:  { type: Schema.Types.Mixed, default: {} },
+    // === Added fields for labels ===
+    labeled_at: { type: Date, index: true },   // when this prediction was labeled
+    label_up: { type: Boolean },               // actual outcome (true = up)
+    price_t0: { type: Number },                // price at prediction time
+    price_t1: { type: Number },                // price at eval time (+24h)
+    brier: { type: Number },                   // Brier score contribution
+    correct: { type: Boolean }                 // whether prediction was correct
+    // =================================
+  },
+  { versionKey: false }
+);
 
-  model_ver: { type: String, default: "v1-momentum" }
-}, { versionKey: false });
+PredictionSchema.index({ coin: 1, model_ver: 1, ts: -1 });
 
-PredictionSchema.index({ coin: 1, ts: -1 });
+const Prediction = mongoose.model("Prediction", PredictionSchema);
 
-export default mongoose.models.Prediction || mongoose.model("Prediction", PredictionSchema);
+export default Prediction;
