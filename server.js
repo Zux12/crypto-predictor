@@ -205,6 +205,13 @@ app.get("/api/scores/by_model", async (req, res) => {
   }
 });
 
+// Alias: /api/bymodel -> /api/scores/by_model (preserves ?days=...)
+app.get("/api/bymodel", (req, res) => {
+  const qs = new URLSearchParams(req.query).toString();
+  res.redirect(307, `/api/scores/by_model${qs ? `?${qs}` : ""}`);
+});
+
+
 // ---- Paper: summary / trades / equity ----
 app.get("/api/paper/summary", async (_req, res) => {
   try {
