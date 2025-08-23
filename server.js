@@ -529,7 +529,7 @@ app.get("/api/export/backfill.csv", async (req, res) => {
   }
 });
 
-// ---- PnL Simulator: v3 vs v4 (inline) ----
+// ---- PnL Simulator: v3 vs v4 (inline, robust via Label -> Prediction) ----
 function _mean(a){ return a.length ? a.reduce((s,v)=>s+v,0)/a.length : 0; }
 
 app.get("/api/sim/pnl", async (req, res) => {
@@ -549,7 +549,6 @@ app.get("/api/sim/pnl", async (req, res) => {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const fee   = feeBps / 10000;
 
-    // Build sweep thresholds
     const taus = [];
     for (let t = lo; t <= hi + 1e-12; t += step) taus.push(Number(t.toFixed(4)));
 
@@ -557,16 +556,31 @@ app.get("/api/sim/pnl", async (req, res) => {
 
     for (const coin of coins) {
       for (const model of models) {
-        // Pull labeled predictions for this coin+model within window (no $lookup needed)
-        const rows = await Prediction.find({
-          coin,
-          horizon: "24h",
-          model_ver: model,
-          labeled_at: { $gte: since }
-        })
-        .sort({ ts: 1 })
-        .select({ _id: 0, ts: 1, p_up: 1, realized_ret: 1 })
-        .lean();
+
+        // Pull labeled rows in window from Label, then join Prediction to get model_ver & p_up
+        const rows = await Label.aggregate([
+          { $match: { coin, horizon: "24h", labeled_at: { $gte: since } } },
+          {
+            $lookup: {
+              from: Prediction.collection.name,   // actual collection name
+              localField: "pred_id",
+              foreignField: "_id",
+              as: "pred"
+            }
+          },
+          { $unwind: "$pred" },
+          { $match: { "pred.model_ver": model } },           // filter model here
+          {
+            $project: {
+              _id: 0,
+              ts: "$pred.ts",
+              // prefer pred.p_up, fallback to label.p_up if present
+              p_up: { $ifNull: ["$pred.p_up", "$p_up"] },
+              realized_ret: "$realized_ret"
+            }
+          },
+          { $sort: { ts: 1 } }
+        ]);
 
         const grid = [];
         let best = { tau: null, n: 0, hit: 0, avg: 0, sum: 0 };
@@ -581,7 +595,6 @@ app.get("/api/sim/pnl", async (req, res) => {
 
           grid.push({ tau, n, hit, avg, sum });
 
-          // choose best by avg, require minimum support n ≥ 30
           if (n >= 30 && avg > (best.avg ?? -1e9)) {
             best = { tau, n, hit, avg, sum };
           }
@@ -591,7 +604,6 @@ app.get("/api/sim/pnl", async (req, res) => {
           coin, model,
           labeled: rows.length,
           best,
-          // keep payload compact (≤ ~60 points)
           grid: grid.length > 60 ? grid.filter((_, i) => i % Math.ceil(grid.length / 60) === 0) : grid
         });
       }
@@ -602,6 +614,7 @@ app.get("/api/sim/pnl", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message || String(e) });
   }
 });
+
 
 
 
