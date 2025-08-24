@@ -703,3 +703,28 @@ load = async function(){
 load();
 setInterval(load, 30_000);
 
+
+// --- Gold price injection (non-invasive) ---
+(function () {
+  async function renderGoldRow() {
+    try {
+      const res = await fetch('/api/gold/latest', { cache: 'no-store' });
+      if (!res.ok) return; // gold not ingested yet
+      const j = await res.json();
+      const pricesEl = document.getElementById('prices');
+      if (!pricesEl) return;
+      const val = Number(j.price);
+      const rowHTML = `<div class="row" data-asset="gold">
+        <span>Gold (XAU/USD)</span>
+        <span>$${(Number.isFinite(val) ? val.toFixed(2) : '—')}</span>
+      </div>`;
+      const existing = pricesEl.querySelector('[data-asset="gold"]');
+      if (existing) existing.outerHTML = rowHTML;
+      else pricesEl.insertAdjacentHTML('beforeend', rowHTML);
+    } catch {
+      /* silent */
+    }
+  }
+  document.addEventListener('DOMContentLoaded', renderGoldRow);
+  setInterval(renderGoldRow, 30_000);
+})();
