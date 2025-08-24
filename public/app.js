@@ -699,11 +699,6 @@ load = async function(){
   }
 };
 
-
-load();
-setInterval(load, 30_000);
-
-
 // --- Gold price injection (non-invasive) ---
 (function () {
   async function renderGoldRow() {
@@ -728,3 +723,10 @@ setInterval(load, 30_000);
   document.addEventListener('DOMContentLoaded', renderGoldRow);
   setInterval(renderGoldRow, 30_000);
 })();
+
+
+
+load();
+setInterval(load, 30_000);
+
+
