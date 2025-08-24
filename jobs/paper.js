@@ -19,17 +19,11 @@ const MAX_POS_PCT  = Number(process.env.PAPER_MAX_POS_PCT || 0.5);
 const FEE_BPS      = Number(process.env.PAPER_FEE_BPS || 10);   // 10 bps = 0.1%
 const MAX_HOLD_MS  = 24 * 60 * 60 * 1000; // exit after 24h
 
-
-// New param start
 const V4_THRESH = {
   bitcoin: Number(process.env.V4_THRESH_BTC || '0.62'),
   ethereum: Number(process.env.V4_THRESH_ETH || '0.60'),
 };
-
-const isV4 = pred.model_ver === 'v4-ai-logreg';
-const coinThresh = isV4 ? (V4_THRESH[pred.coin] || 0.60) : 0.60; // keep your old default for non-v4
-const goLong = pred.p_up >= coinThresh;
-// until here
+const BASE_THRESH = Number(process.env.PAPER_THRESH || '0.60');
 
 
 function feeUSD(notional) { return (notional * FEE_BPS) / 10000; }
@@ -89,9 +83,10 @@ function findHolding(state, coin) {
     const by_coin = [];
 
     for (const coin of COINS) {
-      const px = latest[coin].price?.price;
-      const pred = latest[coin].pred?.p_up;
-      const now = new Date();
+const px = latest[coin].price?.price;
+const predDoc = latest[coin].pred;
+const prob = Number(predDoc?.p_up ?? predDoc?.prob_up ?? predDoc?.p ?? NaN);
+const now = new Date();
 
       const hold = findHolding(state, coin);
       const markValue = hold ? hold.qty * (px || 0) : 0;
@@ -99,13 +94,13 @@ function findHolding(state, coin) {
       by_coin.push({ coin, qty: hold?.qty || 0, mark_price: px || 0, value_usd: markValue });
 
       // If we don't have price or prediction, skip trading logic
-      if (!px || pred == null) continue;
+if (!px || !Number.isFinite(prob)) continue;
 
       // Exit rules (if holding)
       if (hold && hold.qty > 0) {
         const ageMs = now - new Date(hold.opened_at);
         const timeout = ageMs >= MAX_HOLD_MS;
-        const exitSignal = pred < THRESH_EXIT || timeout;
+const exitSignal = prob < THRESH_EXIT || timeout;
 
         if (exitSignal) {
           const notional = hold.qty * px;
@@ -125,8 +120,10 @@ function findHolding(state, coin) {
       }
 
       // Entry rule (if flat)
-      const stillHolding = findHolding(state, coin);
-      if (!stillHolding && pred >= THRESH_ENTER) {
+const isV4 = (predDoc?.model_ver || ACTIVE_MODEL) === "v4-ai-logreg";
+const ENTER = isV4 ? (V4_THRESH[coin] ?? THRESH_ENTER) : THRESH_ENTER;
+
+if (!stillHolding && prob >= ENTER) {
         // target size = MAX_POS_PCT * equity
         const targetNotional = equity * MAX_POS_PCT;
         const qty = targetNotional / px;
