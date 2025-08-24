@@ -82,65 +82,65 @@ function findHolding(state, coin) {
     let equity = state.cash_usd;
     const by_coin = [];
 
-    for (const coin of COINS) {
-const px = latest[coin].price?.price;
-const predDoc = latest[coin].pred;
-const prob = Number(predDoc?.p_up ?? predDoc?.prob_up ?? predDoc?.p ?? NaN);
-const now = new Date();
+for (const coin of COINS) {
+  const px = latest[coin].price?.price;
+  const predDoc = latest[coin].pred;
+  const prob = Number(predDoc?.p_up ?? predDoc?.prob_up ?? predDoc?.p ?? NaN);
+  const now = new Date();
 
-      const hold = findHolding(state, coin);
-      const markValue = hold ? hold.qty * (px || 0) : 0;
-      equity += markValue;
-      by_coin.push({ coin, qty: hold?.qty || 0, mark_price: px || 0, value_usd: markValue });
+  // current holding (if any) + mark-to-market
+  const hold = findHolding(state, coin);
+  const markValue = hold ? hold.qty * (px || 0) : 0;
+  equity += markValue;
+  by_coin.push({ coin, qty: hold?.qty || 0, mark_price: px || 0, value_usd: markValue });
 
-      // If we don't have price or prediction, skip trading logic
-if (!px || !Number.isFinite(prob)) continue;
+  // need price + a valid probability
+  if (!px || !Number.isFinite(prob)) continue;
 
-      // Exit rules (if holding)
-      if (hold && hold.qty > 0) {
-        const ageMs = now - new Date(hold.opened_at);
-        const timeout = ageMs >= MAX_HOLD_MS;
-const exitSignal = prob < THRESH_EXIT || timeout;
+  // ===== Exit rules (if holding) =====
+  if (hold && hold.qty > 0) {
+    const ageMs = now - new Date(hold.opened_at);
+    const timeout = ageMs >= MAX_HOLD_MS;
+    const exitSignal = prob < THRESH_EXIT || timeout;
 
-        if (exitSignal) {
-          const notional = hold.qty * px;
-          const fee = feeUSD(notional);
-          const pnl = (px - hold.entry_price) * hold.qty - fee;
+    if (exitSignal) {
+      const notional = hold.qty * px;
+      const fee = feeUSD(notional);
+      const pnl = (px - hold.entry_price) * hold.qty - fee;
 
-          // realize: sell entire qty
-          state.cash_usd += (notional - fee);
-          // remove holding
-          state.holdings = state.holdings.filter(h => h.coin !== coin);
+      state.cash_usd += (notional - fee);
+      state.holdings = state.holdings.filter(h => h.coin !== coin);
 
-          await PaperTrade.create({
-            ts: now, coin, side: "SELL", qty: hold.qty, price: px,
-            fee_usd: fee, pnl_usd: pnl, reason: timeout ? "timeout_24h" : "exit_threshold"
-          });
-        }
-      }
+      await PaperTrade.create({
+        ts: now, coin, side: "SELL", qty: hold.qty, price: px,
+        fee_usd: fee, pnl_usd: pnl, reason: timeout ? "timeout_24h" : "exit_threshold"
+      });
+    }
+  }
 
-      // Entry rule (if flat)
-const isV4 = (predDoc?.model_ver || ACTIVE_MODEL) === "v4-ai-logreg";
-const ENTER = isV4 ? (V4_THRESH[coin] ?? THRESH_ENTER) : THRESH_ENTER;
+  // ===== Entry rule (if flat) with v4 coin-specific threshold =====
+  const stillHolding = findHolding(state, coin);
+  const isV4 = (predDoc?.model_ver || ACTIVE_MODEL) === "v4-ai-logreg";
+  const ENTER = isV4 ? (V4_THRESH[coin] ?? THRESH_ENTER) : THRESH_ENTER;
 
-if (!stillHolding && prob >= ENTER) {
-        // target size = MAX_POS_PCT * equity
-        const targetNotional = equity * MAX_POS_PCT;
-        const qty = targetNotional / px;
-        if (qty > 0) {
-          const fee = feeUSD(targetNotional);
-          const cost = targetNotional + fee;
-          if (state.cash_usd >= cost) {
-            state.cash_usd -= cost;
-            state.holdings.push({ coin, qty, entry_price: px, opened_at: now });
-            await PaperTrade.create({
-              ts: now, coin, side: "BUY", qty, price: px,
-              fee_usd: fee, pnl_usd: null, reason: "enter_threshold"
-            });
-          }
-        }
+  if (!stillHolding && prob >= ENTER) {
+    const targetNotional = equity * MAX_POS_PCT;
+    const qty = targetNotional / px;
+    if (qty > 0) {
+      const fee = feeUSD(targetNotional);
+      const cost = targetNotional + fee;
+      if (state.cash_usd >= cost) {
+        state.cash_usd -= cost;
+        state.holdings.push({ coin, qty, entry_price: px, opened_at: now });
+        await PaperTrade.create({
+          ts: now, coin, side: "BUY", qty, price: px,
+          fee_usd: fee, pnl_usd: null, reason: "enter_threshold"
+        });
       }
     }
+  }
+}
+
 
     // Recompute equity post-trades (mark-to-market again)
     let finalEquity = state.cash_usd;
