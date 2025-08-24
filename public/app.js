@@ -528,22 +528,32 @@ async function loadLabelsCard(){
 
     // Render compact rows
     box.innerHTML = j.rows.map(r=>{
-      const ts = new Date(r.pred_ts).toLocaleString();
-      const coin = r.coin || "—";
-      const up   = r.label_up ? "↑" : "↓";
-      const p    = typeof r.p_up === "number" ? (r.p_up*100).toFixed(1) + "%" : "—";
-      const acc  = r.correct ? "✅" : "❌";
-      const brier = (typeof r.brier === "number") ? r.brier.toFixed(4) : "—";
-      return `
-        <div class="row" style="gap:10px">
-          <span class="muted" style="min-width:160px">${ts}</span>
-          <strong style="min-width:90px">${coin}</strong>
-          <span style="min-width:70px">${up}</span>
-          <span style="min-width:100px">p_up ${p}</span>
-          <span style="min-width:70px">${acc}</span>
-          <span class="muted" style="min-width:100px">brier ${brier}</span>
-        </div>`;
-    }).join("");
+  const ts = new Date(r.pred_ts).toLocaleString();
+  const coin = r.coin || "—";
+  const up   = r.label_up ? "↑" : "↓";
+  const p    = typeof r.p_up === "number" ? (r.p_up*100).toFixed(1) + "%" : "—";
+  const acc  = r.correct ? "✅" : "❌";
+  const brier = (typeof r.brier === "number") ? r.brier.toFixed(4) : "—";
+
+  // subtle v3/v4 badge (short form like "v4")
+  const badge = (r.model_ver && r.model_ver.match(/^v\d+/))
+    ? r.model_ver.match(/^v\d+/)[0]
+    : (r.model_ver || "");
+  const badgeHTML = badge
+    ? `<span style="padding:2px 6px;border-radius:999px;font-size:12px;background:#1f2937;color:#9ca3af;border:1px solid #374151;margin-left:6px">${badge}</span>`
+    : "";
+
+  return `
+    <div class="row" style="gap:10px">
+      <span class="muted" style="min-width:160px">${ts}</span>
+      <strong style="min-width:90px">${coin}</strong>${badgeHTML}
+      <span style="min-width:70px">${up}</span>
+      <span style="min-width:100px">p_up ${p}</span>
+      <span style="min-width:70px">${acc}</span>
+      <span class="muted" style="min-width:100px">brier ${brier}</span>
+    </div>`;
+}).join("");
+
   } catch (e) {
     console.error("[Dashboard] loadLabelsCard error:", e);
     box.textContent = "Failed to load labels.";
