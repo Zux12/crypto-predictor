@@ -19,7 +19,22 @@ const MAX_POS_PCT  = Number(process.env.PAPER_MAX_POS_PCT || 0.5);
 const FEE_BPS      = Number(process.env.PAPER_FEE_BPS || 10);   // 10 bps = 0.1%
 const MAX_HOLD_MS  = 24 * 60 * 60 * 1000; // exit after 24h
 
+
+// New param start
+const V4_THRESH = {
+  bitcoin: Number(process.env.V4_THRESH_BTC || '0.62'),
+  ethereum: Number(process.env.V4_THRESH_ETH || '0.60'),
+};
+
+const isV4 = pred.model_ver === 'v4-ai-logreg';
+const coinThresh = isV4 ? (V4_THRESH[pred.coin] || 0.60) : 0.60; // keep your old default for non-v4
+const goLong = pred.p_up >= coinThresh;
+// until here
+
+
 function feeUSD(notional) { return (notional * FEE_BPS) / 10000; }
+
+
 
 async function getLatestPrice(coin) {
   return Price.findOne({ coin }).sort({ ts: -1 }).lean();
