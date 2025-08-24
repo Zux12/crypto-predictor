@@ -1,6 +1,8 @@
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
+import goldRoute from './routes/gold.js';
+
 
 // ==== Models (load all before routes use them) ====
 import Price from "./models/Price.js";
@@ -32,6 +34,8 @@ const TZ_DISPLAY = process.env.TIMEZONE || "UTC";
 // ---- App ----
 const app = express();
 
+
+
 // ---- CORS (robust, permissive; you can tighten later) ----
 app.use(cors({
   origin: (origin, cb) => cb(null, true),
@@ -43,6 +47,7 @@ app.options("*", cors());
 
 // ---- Static (serve SPA) ----
 app.use(express.static("public"));
+app.use('/api/gold', goldRoute);
 
 // ---- Mounted route modules ----
 app.use("/api/equity", equityRoute);
