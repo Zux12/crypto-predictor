@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import Price from "../models/Price.js";
 import Prediction from "../models/Prediction.js";
+import yahooFinance from "yahoo-finance2";
+
 
 const MONGO_URI = process.env.MONGO_URI;
 if (!MONGO_URI) { console.error("Missing MONGO_URI"); process.exit(1); }
@@ -56,16 +58,34 @@ async function loadCloses(coin, n = 240) {
   return rows.map(r => Number(r.price)).filter(Number.isFinite);
 }
 
-// --- GOLD helpers (non-invasive) ---
+// --- GOLD helpers (with Yahoo fallback) ---
 async function loadGoldCloses(n = 300) {
   const rows = await Price.find({ coin: "gold" }).sort({ ts: -1 }).limit(n).lean();
   rows.reverse();
   return rows.map(r => Number(r.price)).filter(Number.isFinite);
 }
 
-// cumulative return over `lag` days for GOLD (today vs `lag` days ago)
+async function loadGoldDailyClosesFromYahoo(days = 40) {
+  // GC=F daily closes for the last `days`
+  const period1 = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const period2 = new Date();
+  const hist = await yahooFinance.historical("GC=F", {
+    period1,
+    period2,
+    interval: "1d"
+  });
+  const closes = (hist || []).map(r => Number(r.close)).filter(Number.isFinite);
+  return closes;
+}
+
+// cumulative return over `lag` DAYS for GOLD
 async function goldRetLag(lag = 10) {
-  const g = await loadGoldCloses(Math.max(60, lag + 30));
+  // 1) Try DB (may be intraday; likely too short for 8–10d right now)
+  let g = await loadGoldCloses(lag + 5);
+  if (!g || g.length <= lag) {
+    // 2) Fallback to Yahoo daily candles
+    try { g = await loadGoldDailyClosesFromYahoo(lag + 20); } catch { g = null; }
+  }
   if (!g || g.length <= lag) return null;
   const now = g[g.length - 1];
   const past = g[g.length - 1 - lag];
@@ -73,8 +93,8 @@ async function goldRetLag(lag = 10) {
   return (now - past) / past;
 }
 
-// clamp helper
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+
 
 
 // ---------- feature builder ----------
