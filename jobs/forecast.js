@@ -202,10 +202,17 @@ async function makePredictionForCoin(coin) {
   if (!f) return null;
 
   // v4 (AI) first
-  const p_up_v4 = predictLogReg(f);
-  await Prediction.create({
-    coin, horizon: "24h", p_up: p_up_v4, features: f, model_ver: "v4-ai-logreg"
-  });
+ const p_up_v4 = predictLogReg(f);
+await Prediction.create({
+  coin,
+  horizon: "24h",
+  ts: new Date(),
+  p_up: p_up_v4,
+  prob_up: p_up_v4,  // keep both
+  features: f,
+  model_ver: "v4-ai-logreg"
+});
+
   
   // v4 + XAU lead nudge (ETH ≈ 8d, BTC ≈ 10d), small & symmetric
 try {
@@ -222,13 +229,16 @@ try {
     p_adj = clamp01(p_up_v4 + sign * NUDGE);
   }
 
-  await Prediction.create({
-    coin,
-    horizon: "24h",
-    p_up: p_adj,
-    features: { ...f, xau_ret_lag: xauLagRet, xau_lag_used: lag },
-    model_ver: "v4-ai-logreg-xau" // new model label, shows alongside your current v4
-  });
+await Prediction.create({
+  coin,
+  horizon: "24h",
+  ts: new Date(),
+  p_up: p_adj,
+  prob_up: p_adj,    // keep both
+  features: { ...f, xau_ret_lag: xauLagRet, xau_lag_used: lag },
+  model_ver: "v4-ai-logreg-xau"
+});
+
 } catch (e) {
   console.warn(`[xau-nudge] skipped for ${coin}:`, e?.message || e);
 }
