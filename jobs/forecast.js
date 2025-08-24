@@ -56,6 +56,27 @@ async function loadCloses(coin, n = 240) {
   return rows.map(r => Number(r.price)).filter(Number.isFinite);
 }
 
+// --- GOLD helpers (non-invasive) ---
+async function loadGoldCloses(n = 300) {
+  const rows = await Price.find({ coin: "gold" }).sort({ ts: -1 }).limit(n).lean();
+  rows.reverse();
+  return rows.map(r => Number(r.price)).filter(Number.isFinite);
+}
+
+// cumulative return over `lag` days for GOLD (today vs `lag` days ago)
+async function goldRetLag(lag = 10) {
+  const g = await loadGoldCloses(Math.max(60, lag + 30));
+  if (!g || g.length <= lag) return null;
+  const now = g[g.length - 1];
+  const past = g[g.length - 1 - lag];
+  if (!Number.isFinite(now) || !Number.isFinite(past) || past === 0) return null;
+  return (now - past) / past;
+}
+
+// clamp helper
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+
+
 // ---------- feature builder ----------
 function buildFeatures(closes) {
   if (!closes || closes.length < 20) return null;
@@ -185,6 +206,33 @@ async function makePredictionForCoin(coin) {
   await Prediction.create({
     coin, horizon: "24h", p_up: p_up_v4, features: f, model_ver: "v4-ai-logreg"
   });
+  
+  // v4 + XAU lead nudge (ETH ≈ 8d, BTC ≈ 10d), small & symmetric
+try {
+  const lag = (coin === "ethereum") ? 8 : 10;     // from your Granger results
+  const xauLagRet = await goldRetLag(lag);
+
+  // Size of the nudge (you can change via env XAU_NUDGE=0.12 etc.)
+  const NUDGE = Number(process.env.XAU_NUDGE || 0.08);
+
+  let p_adj = p_up_v4;
+  if (Number.isFinite(xauLagRet)) {
+    // simple signed nudge: up if gold rose over the lag window, down if fell
+    const sign = xauLagRet > 0 ? 1 : -1;
+    p_adj = clamp01(p_up_v4 + sign * NUDGE);
+  }
+
+  await Prediction.create({
+    coin,
+    horizon: "24h",
+    p_up: p_adj,
+    features: { ...f, xau_ret_lag: xauLagRet, xau_lag_used: lag },
+    model_ver: "v4-ai-logreg-xau" // new model label, shows alongside your current v4
+  });
+} catch (e) {
+  console.warn(`[xau-nudge] skipped for ${coin}:`, e?.message || e);
+}
+
 
   // v3 (heuristic) for comparison
   const { p_up: p_up_v3, raw_score, components } = scoreToProb(f, process.env.PRED_DEBUG === "1");
