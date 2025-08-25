@@ -719,6 +719,7 @@ load = async function(){
     await loadLabelsCard();
     await loadPnL();   // 👈 new
     await renderGoldRow(); // 👈 new: ensures Gold row survives repaint
+    await loadPnLXAU();     // NEW
   } catch (e) {
     console.error("[Dashboard] load error:", e);
   }
