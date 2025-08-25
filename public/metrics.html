@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Crypto Predictor • Metrics</title>
+  <style>
+    :root{ --bg:#0f172a; --card:#111827; --muted:#9ca3af; --text:#e5e7eb; --good:#22c55e; --bad:#ef4444; }
+    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap{ max-width:980px; margin:24px auto; padding:0 16px; }
+    .card{ background:var(--card); border-radius:16px; padding:18px; box-shadow:0 10px 25px rgba(0,0,0,.35); margin-bottom:16px; }
+    h1{ margin:0 0 12px; font-size:22px }
+    .row{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
+    input,select,button{ background:#1f2937; color:#d1d5db; border:1px solid #374151; border-radius:10px; padding:8px 10px; }
+    table{ width:100%; border-collapse:collapse; margin-top:8px; font-variant-numeric:tabular-nums }
+    th,td{ padding:8px 10px; border-bottom:1px solid #1f2937; text-align:left }
+    .good{ color:var(--good) } .bad{ color:var(--bad) } .muted{ color:var(--muted) }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>V4 vs V4‑XAU — Threshold Buckets</h1>
+      <div class="row">
+        <label>Window (hours) <input id="hrs" type="number" min="1" max="72" value="24" style="width:90px"></label>
+        <label>Thresholds (comma) <input id="th" type="text" value="0.6,0.7" style="width:140px"></label>
+        <button id="run">Refresh</button>
+        <span id="note" class="muted"></span>
+      </div>
+      <div id="out"></div>
+    </div>
+  </div>
+  <script src="/metrics.js"></script>
+</body>
+</html>
