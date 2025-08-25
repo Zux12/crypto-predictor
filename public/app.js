@@ -618,6 +618,30 @@ async function loadPnL(){
   }
 }
 
+async function loadPnLXAU(){
+  const box = document.getElementById("pnl-xau-card");
+  try {
+    const j = await fetchJSON(`/api/paper/pnl-xau`);
+    if (!j?.ok || !j.pnl) {
+      box.textContent = j?.note || "No PnL yet (waiting for first 24h labels).";
+      return;
+    }
+    const p = j.pnl;
+    const color = p.net_pnl_usd >= 0 ? "good" : "bad";
+    box.innerHTML = `
+      <div class="row"><span>Threshold</span><span>${(p.thresh_used*100).toFixed(0)}%</span></div>
+      <div class="row"><span>Trades</span><span>${p.n_trades}</span></div>
+      <div class="row"><span>Start</span><span>$${fmt(p.start_balance,2)}</span></div>
+      <div class="row"><span>Current</span><span>$${fmt(p.current_equity,2)}</span></div>
+      <div class="row"><span>PnL</span><span class="${color}">$${fmt(p.net_pnl_usd,2)} (${fmt(p.net_pnl_pct,2)}%)</span></div>
+      <div class="row"><span>Total Fees</span><span>$${fmt(p.total_fees,2)}</span></div>
+    `;
+  } catch (e) {
+    box.textContent = "Failed to load.";
+  }
+}
+
+
 function pct(x, d=2){ return (x*100).toFixed(d) + "%"; }
 function fmtN(x){ return (x||0).toLocaleString(); }
 
