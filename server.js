@@ -2,6 +2,8 @@ import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
 import goldRoute from './routes/gold.js';
+import metricsCompareRoute from "./routes/metrics_compare.js";
+
 
 
 // ==== Models (load all before routes use them) ====
@@ -33,6 +35,8 @@ const TZ_DISPLAY = process.env.TIMEZONE || "UTC";
 
 // ---- App ----
 const app = express();
+app.use("/api/metrics", metricsCompareRoute);
+
 
 
 
