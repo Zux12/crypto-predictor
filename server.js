@@ -457,6 +457,71 @@ app.get("/api/paper/pnl", async (_req, res) => {
   }
 });
 
+// ---- Paper PnL (synthetic) for v4-ai-logreg-xau, read-only ----
+app.get("/api/paper/pnl-xau", async (req, res) => {
+  try {
+    const START = Number(process.env.PNL_XAU_START || 10000); // virtual starting balance
+    const FEE_BPS = Number(process.env.PNL_XAU_FEE_BPS || 10); // 10 bps per round-trip
+    const THRESH = Number(process.env.PNL_XAU_THRESH || 0.70); // only trade when p_up >= 70%
+
+    // Join labels (realized outcomes) to their predictions, keep only v4-xau + threshold
+    const rows = await Label.aggregate([
+      { $sort: { pred_ts: 1 } }, // oldest to newest for compounding
+      { $lookup: {
+          from: "predictions",
+          localField: "pred_id",
+          foreignField: "_id",
+          as: "pred"
+      }},
+      { $unwind: "$pred" },
+      { $match: { "pred.model_ver": "v4-ai-logreg-xau", "pred.p_up": { $gte: THRESH } } },
+      { $project: {
+          _id: 0,
+          coin: 1,
+          pred_ts: 1,
+          horizon: 1,
+          p_up: "$pred.p_up",
+          realized_ret: 1
+      }}
+    ]);
+
+    if (!rows.length) {
+      return res.json({ ok: true, pnl: null, note: "No matured v4-xau trades yet." });
+    }
+
+    // Roll forward a synthetic equity curve:
+    // unit-notional trade per signal; apply tiny fee; cap hold at realized_ret (24h)
+    let equity = START;
+    let totalFees = 0;
+    for (const r of rows) {
+      const gross = r.realized_ret || 0; // e.g. +0.012 = +1.2%
+      const fee = Math.abs(equity) * (FEE_BPS / 10000);
+      equity = equity * (1 + gross) - fee; // compound and subtract fee
+      totalFees += fee;
+    }
+
+    const pnlUsd = equity - START;
+    const pnlPct = (equity / START - 1) * 100;
+
+    res.json({
+      ok: true,
+      pnl: {
+        start_balance: START,
+        current_equity: Number(equity.toFixed(2)),
+        net_pnl_usd: Number(pnlUsd.toFixed(2)),
+        net_pnl_pct: Number(pnlPct.toFixed(2)),
+        total_fees: Number(totalFees.toFixed(2)),
+        n_trades: rows.length,
+        thresh_used: THRESH,
+        fee_bps: FEE_BPS
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  }
+});
+
+
 // ---- CSV exports ----
 app.get("/api/export/training.csv", async (req, res) => {
   try {
