@@ -42,7 +42,8 @@ const TZ_DISPLAY = process.env.TIMEZONE || "UTC";
 const app = express();
 app.use("/api/metrics", metricsCompareRoute);
 app.use("/api/go", goRoute);
-app.use("/api/tg", tgRoute);
+app.use("/api/tg", express.json(), tgRoute);
+
 
 
 
