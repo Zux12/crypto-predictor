@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import cors from "cors";
 import goldRoute from './routes/gold.js';
 import metricsCompareRoute from "./routes/metrics_compare.js";
+import goRoute from "./routes/go.js";
+
 
 
 
