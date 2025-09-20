@@ -4,7 +4,10 @@ import cors from "cors";
 import goldRoute from './routes/gold.js';
 import metricsCompareRoute from "./routes/metrics_compare.js";
 import goRoute from "./routes/go.js";
+import tgRoute from "./routes/tg.js";
 
+
+app.use(express.json());
 
 
 
@@ -39,6 +42,8 @@ const TZ_DISPLAY = process.env.TIMEZONE || "UTC";
 const app = express();
 app.use("/api/metrics", metricsCompareRoute);
 app.use("/api/go", goRoute);
+app.use("/api/tg", tgRoute);
+
 
 
 
