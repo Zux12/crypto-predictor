@@ -103,53 +103,59 @@ r.post("/:secret", async (req, res) => {
     if (!TOKEN || !CHAT_ID || !TG_SECRET) return res.sendStatus(200);
     if (req.params.secret !== TG_SECRET) return res.sendStatus(404);
 
-    const update = req.body;
-    const msg = update?.message;
-    const chatId = String(msg?.chat?.id || "");
-    const text = (msg?.text || "").trim();
+const update = req.body;
+// handle message / edited_message uniformly
+const msg = update?.message || update?.edited_message || null;
+const chatId = String(msg?.chat?.id || "");
+// commands can be in text or caption; also allow /go@botname and case-insensitive
+const rawText = (msg?.text || msg?.caption || "").trim();
+const text = rawText.replace(/\s+$/,""); // normalize trailing spaces
+
+function isCmd(re, s = text){
+  // matches /go, /GO, /go@bot, /go btc, etc.
+  return re.test(s);
+}
+
 
     // (Optional simple allowlist: only reply to your CHAT_ID)
-    if (chatId && CHAT_ID && chatId !== String(CHAT_ID)) {
-      // ignore others silently
-      return res.sendStatus(200);
-    }
 
-    if (!text || text === "/start") {
-      await reply(chatId || CHAT_ID, "Hi! Send /go for BTC & ETH status or /help for commands.");
-      return res.sendStatus(200);
-    }
+ if (!text || isCmd(/^\/start/i)) {
+  await reply(chatId || CHAT_ID, "Hi! Send /go for BTC & ETH status or /help for commands.");
+  return res.sendStatus(200);
+}
 
-    if (text === "/help") {
-      await reply(chatId || CHAT_ID, helpText());
-      return res.sendStatus(200);
-    }
+if (isCmd(/^\/help/i)) {
+  await reply(chatId || CHAT_ID, helpText());
+  return res.sendStatus(200);
+}
 
-    if (text === "/why") {
-      await reply(chatId || CHAT_ID, ruleText());
-      return res.sendStatus(200);
-    }
+if (isCmd(/^\/why/i)) {
+  await reply(chatId || CHAT_ID, ruleText());
+  return res.sendStatus(200);
+}
 
-    if (text === "/go") {
-      const all = await computeAll();
-      const body = [formatOne(all.bitcoin), formatOne(all.ethereum)].join("\n\n");
-      await reply(chatId || CHAT_ID, body);
-      return res.sendStatus(200);
-    }
+// /go or /go@bot or /go   <coin>
+if (isCmd(/^\/go(@[\w_]+)?\s*$/i)) {
+  const all = await computeAll();
+  const body = [formatOne(all.bitcoin), formatOne(all.ethereum)].join("\n\n");
+  await reply(chatId || CHAT_ID, body);
+  return res.sendStatus(200);
+}
+if (isCmd(/^\/go(@[\w_]+)?\s+btc(?:oin)?$/i)) {
+  const r1 = await computeOne("bitcoin");
+  await reply(chatId || CHAT_ID, formatOne(r1));
+  return res.sendStatus(200);
+}
+if (isCmd(/^\/go(@[\w_]+)?\s+eth(?:ereum)?$/i)) {
+  const r2 = await computeOne("ethereum");
+  await reply(chatId || CHAT_ID, formatOne(r2));
+  return res.sendStatus(200);
+}
 
-    if (text.toLowerCase() === "/go btc" || text.toLowerCase() === "/go bitcoin") {
-      const r1 = await computeOne("bitcoin");
-      await reply(chatId || CHAT_ID, formatOne(r1));
-      return res.sendStatus(200);
-    }
-    if (text.toLowerCase() === "/go eth" || text.toLowerCase() === "/go ethereum") {
-      const r2 = await computeOne("ethereum");
-      await reply(chatId || CHAT_ID, formatOne(r2));
-      return res.sendStatus(200);
-    }
+// fallback
+await reply(chatId || CHAT_ID, "Unknown command. Try /go or /help");
+return res.sendStatus(200);
 
-    // fallback
-    await reply(chatId || CHAT_ID, "Unknown command. Try /go or /help");
-    res.sendStatus(200);
   } catch (e) {
     // Always 200 to Telegram
     res.sendStatus(200);
