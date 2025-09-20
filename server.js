@@ -31,7 +31,7 @@ import labelsRoute from "./routes/labels.js";
 
 // import simRoute from "./routes/sim.js";
 // app.use("/api/sim", simRoute); // exposes /api/sim/pnl
-
+app.use(express.json());   
 
 // ---- Env / constants ----
 const PORT = process.env.PORT || 10000;
