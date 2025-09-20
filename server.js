@@ -7,7 +7,7 @@ import goRoute from "./routes/go.js";
 import tgRoute from "./routes/tg.js";
 
 
-app.use(express.json());
+
 
 
 
