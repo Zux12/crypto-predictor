@@ -17,6 +17,32 @@
   .btn{ background:#1f2937; color:#d1d5db; border:1px solid #374151; border-radius:10px; padding:8px 12px; cursor:pointer; }
   .topbar{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
 </style>
+
+  <style>
+  /* === Chips UI (optional) === */
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .chip {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:4px 8px; border-radius:999px; font-size:12px; line-height:1;
+    border:1px solid #374151; background:#111827; color:#d1d5db;
+  }
+  .chip b { font-weight:700 }
+  .chip-conf.ok   { border-color:#2563eb } /* blue edge */
+  .chip-conf.warn { border-color:#f59e0b } /* amber edge */
+  .chip-conf.bad  { border-color:#ef4444 } /* red edge  */
+  .chip-dip       { border-color:#22c55e; }
+  .chip .dot { width:8px; height:8px; border-radius:50%; background:#6b7280 }
+  .chip-conf.ok   .dot { background:#2563eb }
+  .chip-conf.warn .dot { background:#f59e0b }
+  .chip-conf.bad  .dot { background:#ef4444 }
+  .chip-dip .dot       { background:#22c55e }
+
+  /* Tiny toggle group in the topbar */
+  .toggles { margin-left:auto; display:flex; gap:10px; align-items:center; }
+  .toggles label { font-size:12px; color:#9ca3af; display:flex; gap:6px; align-items:center; }
+  .toggles input { accent-color:#22c55e; }
+</style>
+
 </head>
 <body>
 <div class="wrap">
@@ -24,6 +50,11 @@
     <button class="btn" onclick="location.href='/metrics.html'">← Back to Metrics</button>
     <button id="refresh" class="btn">Refresh</button>
     <span id="asof" class="muted"></span>
+    <div class="toggles">
+  <label><input id="toggle-conf" type="checkbox" checked> Confidence</label>
+  <label><input id="toggle-dip"  type="checkbox"> Near-dip</label>
+</div>
+
   </div>
 
   <div id="btc" class="row"></div>
@@ -33,6 +64,27 @@
     Rule: v4-xau p_up ∈ [70%,74%); 7d bucket avg ≥ 0; n ≥ 50. Entry window 1h; exit 24h.
   </div>
 </div>
+
+
+  
 <script src="/go.js"></script>
+<script src="/chips.js"></script>
+
+<!-- Notes: Confidence & Near-dip (for future you) -->
+<details class="muted" style="margin:12px 0; color:#9ca3af">
+  <summary>Notes: Confidence & Near-dip</summary>
+  <div style="margin-top:6px; font-size:12px">
+    <p><b>Confidence chip</b> shows <code>p_up</code>, <code>n</code>, and the recent 7-day bucket average return parsed from the reason string (e.g., <i>“p_up=60.3% • 7d(70–74%) +0.43% (n=92)”</i>). Border color hints:
+      <ul style="margin:6px 0 6px 16px">
+        <li><b>Blue</b>: p_up ≥ 55% and bucket ≥ 0 (informational OK)</li>
+        <li><b>Amber</b>: p_up between ~50–55% or bucket slightly negative</li>
+        <li><b>Red</b>: p_up < 50% or clearly negative bucket</li>
+      </ul>
+    </p>
+    <p><b>Near-dip chip</b> is <i>optional</i> and purely informational. By default it’s off. If your backend sets <code>window.NEAR_DIP_MAP = { bitcoin:true/false, ethereum:true/false }</code> or if a <code>data-near-dip="1"</code> attribute appears on a coin row, the green “Near-dip” chip will show. You can later wire this to RSI&lt;30 + price ≤ lower-band.</p>
+    <p>You can toggle chips using the checkboxes above; state persists in <code>localStorage</code>.</p>
+  </div>
+</details>
+
 </body>
 </html>
