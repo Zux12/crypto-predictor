@@ -7,13 +7,7 @@ import goRoute from "./routes/go.js";
 import tgRoute from "./routes/tg.js";
 import combined from "./routes/combined.js";
 import combinedSignal from "./routes/combined_signal.js";
-
-
-
-
-
-
-
+import tgMicroAddon from "./routes/tg_micro_addon.js";
 
 
 
@@ -48,14 +42,10 @@ const TZ_DISPLAY = process.env.TIMEZONE || "UTC";
 const app = express();
 app.use("/api/metrics", metricsCompareRoute);
 app.use("/api/go", goRoute);
+app.use("/api/tg", tgMicroAddon);          // <-- add-on first
 app.use("/api/tg", express.json(), tgRoute);
 app.use("/api/combined", combined);
 app.use("/api/combined", combinedSignal);   // keep your existing /api/combined/summary too
-
-
-
-
-
 
 
 // ---- CORS (robust, permissive; you can tighten later) ----
