@@ -5,6 +5,9 @@ import goldRoute from './routes/gold.js';
 import metricsCompareRoute from "./routes/metrics_compare.js";
 import goRoute from "./routes/go.js";
 import tgRoute from "./routes/tg.js";
+import combined from "./routes/combined.js";
+
+
 
 
 
@@ -43,6 +46,7 @@ const app = express();
 app.use("/api/metrics", metricsCompareRoute);
 app.use("/api/go", goRoute);
 app.use("/api/tg", express.json(), tgRoute);
+app.use("/api/combined", combined);
 
 
 
