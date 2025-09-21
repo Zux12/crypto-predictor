@@ -194,10 +194,13 @@ const GoState = mongoose.models.GoState || mongoose.model("GoState", new mongoos
         { upsert: true }
       );
     } else if (shouldSendHeartbeat(now)) {
-      const snapshot =
-        `⏱️ Snapshot ${mytDate(now)} MYT\n` +
-        head + "\n" +
-        fmtMicroLine(microMap[coin]) + "\n";  // <— add Micro line here
+// add one Micro line under the coin
+  const sig = microMap[coin];
+  const snapshot =
+    `⏱️ Snapshot ${mytDate(now)} MYT\n` +
+    head + "\n" +
+    fmtMicroLine(sig) + "\n";
+
       
       await tgSend(snapshot);
       await GoState.updateOne(
