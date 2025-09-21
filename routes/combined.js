@@ -110,7 +110,12 @@ router.get("/summary", async (req, res) => {
       }
 
       // v4 gate
-      const v4 = (Number(d.p_up) >= thP) && (Number(d.n) >= thN) && (Number(d.bucket7d) >= thB);
+const pOK = Number(d.p_up) >= thP;
+const nOK = Number(d.n)    >= thN;
+const bVal = Number(d.bucket7d);
+const bOK = Number.isFinite(bVal) ? (bVal >= thB) : (thB <= 0);  // missing bucket passes if threshold ≤ 0
+const v4  = pOK && nOK && bOK;
+
 
       // returns with tolerance
       const p0 = ind.price[i0];
