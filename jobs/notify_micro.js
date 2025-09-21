@@ -236,6 +236,22 @@ function fmtHeartbeatLine(coin, v4, standby, dip, winLeftMin, p_up, n, bucket){
     }
   }
 
+// add near the bottom, just before final disconnect/exit:
+const DOUBLE_PASS = String(process.env.MICRO_DOUBLE_PASS ?? "on") === "on";
+
+(async () => {
+  await runOnce();                     // your current main body → move into a function runOnce()
+  if (DOUBLE_PASS) {
+    await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+    await runOnce();                   // second pass at +5m
+  }
+  await mongoose.disconnect();
+  process.exit(0);
+})();
+
+
+  
+  
   await mongoose.disconnect();
   process.exit(0);
 })().catch(async e => {
@@ -243,3 +259,5 @@ function fmtHeartbeatLine(coin, v4, standby, dip, winLeftMin, p_up, n, bucket){
   try { await mongoose.disconnect(); } catch {}
   process.exit(1);
 });
+
+
