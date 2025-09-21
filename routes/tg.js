@@ -1,165 +1,247 @@
-// routes/tg.js
-import { Router } from "express";
-import Prediction from "../models/Prediction.js";
-import Label from "../models/Label.js";
+// routes/tg.js  (ESM)
+import express from "express";
+import mongoose from "mongoose";
 
-const r = Router();
-
-const COINS = ["bitcoin", "ethereum"];
-const MODEL = "v4-ai-logreg-xau";
-const BUCKET_LO = 0.70, BUCKET_HI = 0.75; // target bucket [70,75)
-const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const MIN_N = 50;
-const ENTRY_SEC = 60 * 60;
-const EXIT_SEC  = 24 * 60 * 60;
-
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
-const TG_SECRET = process.env.TG_SECRET || "";
-
-function secsLeft(sinceMs, horizonSec){
-  const dt = Math.floor((horizonSec*1000) - (Date.now() - sinceMs));
-  return dt > 0 ? Math.floor(dt/1000) : 0;
-}
-function fmtMins(secs){
-  const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
-  return h > 0 ? `${h}h ${String(m).padStart(2,"0")}m` : `${m}m`;
-}
-async function bucketStats(coin){
-  const since = new Date(Date.now() - LOOKBACK_MS);
-  const rows = await Label.aggregate([
-    { $match: { labeled_at: { $gte: since } } },
-    { $lookup: { from:"predictions", localField:"pred_id", foreignField:"_id", as:"pred" } },
-    { $unwind: "$pred" },
-    { $match: { "pred.model_ver":MODEL, "pred.coin":coin, "pred.p_up": { $gte: BUCKET_LO, $lt: BUCKET_HI } } },
-    { $group: { _id:null, n:{ $sum:1 }, avg:{ $avg:"$realized_ret" } } }
-  ]);
-  const d = rows[0] || { n:0, avg:null };
-  return { n: d.n, avg: d.avg };
-}
-async function latestPred(coin){
-  return await Prediction.findOne({ coin, model_ver: MODEL }).sort({ ts:-1 }).lean();
-}
-async function computeOne(coin){
-  const [pred, bucket] = await Promise.all([ latestPred(coin), bucketStats(coin) ]);
-  if (!pred) return { coin, status:"NO-GO", reason:"no prediction" };
-  const p = Number(pred.p_up ?? pred.prob_up ?? 0);
-  const inBucket = p >= BUCKET_LO && p < BUCKET_HI;
-  const bucketOk = (bucket.n >= MIN_N) && (bucket.avg != null && bucket.avg >= 0);
-  const status = (inBucket && bucketOk) ? "GO" : "NO-GO";
-  const tsMs = new Date(pred.ts).getTime();
-  const entryLeft = secsLeft(tsMs, ENTRY_SEC);
-  const exitLeft  = secsLeft(tsMs, EXIT_SEC);
-  const parts = [];
-  parts.push(`p_up=${(p*100).toFixed(1)}%`);
-  if (bucket.avg != null) parts.push(`7d(70–74%) ${(bucket.avg>=0?"+":"")}${(bucket.avg*100).toFixed(2)}%`);
-  parts.push(`n=${bucket.n}`);
-  if (!inBucket) parts.push("outside 70–74%");
-  if (bucket.n < MIN_N) parts.push("n<threshold");
-  if (bucket.avg != null && bucket.avg < 0) parts.push("bucket<0");
-  return {
-    coin, status,
-    entry: entryLeft, exit: exitLeft,
-    reason: parts.join(" • ")
-  };
-}
-async function computeAll(){
-  const rows = await Promise.all(COINS.map(c => computeOne(c)));
-  return Object.fromEntries(rows.map(r => [r.coin, r]));
-}
-async function reply(chatId, text){
-  const url = `https://api.telegram.org/bot${TOKEN}/sendMessage`;
-  await fetch(url, {
-    method:"POST",
-    headers:{ "Content-Type":"application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ chat_id: chatId, text })
-  }).catch(()=>{});
+// Use global fetch if available; otherwise lazy import node-fetch
+async function httpFetch(url, opts) {
+  const f = globalThis.fetch ?? (await import("node-fetch")).default;
+  return f(url, opts);
 }
 
-function formatOne(r){
-  const icon = r.status === "GO" ? "🟢" : "🔴";
-  const entry = r.entry ? fmtMins(r.entry) + " left" : "elapsed";
-  const exit  = r.exit  ? fmtMins(r.exit)  + " left" : "elapsed";
-  return `${r.coin.toUpperCase()}: ${icon} ${r.status}\n${r.reason}\nEntry: ${entry} • Exit: ${exit}`;
+const router = express.Router();
+
+// ===== ENV =====
+const TOKEN       = process.env.TELEGRAM_BOT_TOKEN;
+const APP_BASE    = process.env.APP_BASE_URL || ""; // e.g. https://crypto-predictor25-…herokuapp.com
+const CHAT_WHITELIST = (process.env.TG_CHAT_WHITELIST || "").split(",").map(s => s.trim()).filter(Boolean);
+
+// Micro preset (same as UI preset; adjust via Heroku config vars)
+const MICRO_COINS = (process.env.MICRO_COINS || "bitcoin,ethereum").split(",").map(s => s.trim());
+const MICRO_P     = process.env.MICRO_P   ?? "0.55";
+const MICRO_N     = process.env.MICRO_N   ?? "50";
+const MICRO_B     = process.env.MICRO_B   ?? "-0.001";
+const MICRO_W     = process.env.MICRO_W   ?? "30";
+const MICRO_RSI   = process.env.MICRO_RSI ?? "35";
+const MICRO_BBK   = process.env.MICRO_BBK ?? "1.5";
+const MICRO_TP    = process.env.MICRO_TP  ?? "0.003";
+const MICRO_SL    = process.env.MICRO_SL  ?? "0.002";
+const MICRO_HOLD  = process.env.MICRO_HOLD?? "2";
+
+// ===== helpers =====
+function mytNow() {
+  const t = new Date(Date.now() + 8 * 3600 * 1000);
+  return t.toISOString().slice(11, 16); // "HH:MM"
+}
+function coinNorm(s="") {
+  s = s.toLowerCase();
+  if (s === "btc") return "bitcoin";
+  if (s === "eth") return "ethereum";
+  return s;
 }
 
-function helpText(){
-  return [
-    "Commands:",
-    "/go — status for BTC & ETH",
-    "/go btc — BTC only",
-    "/go eth — ETH only",
-    "/why — rule summary"
-  ].join("\n");
+async function tgSend(chatId, text) {
+  if (!TOKEN) throw new Error("Missing TELEGRAM_BOT_TOKEN");
+  const res = await httpFetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true })
+  });
+  const js = await res.json().catch(() => ({}));
+  if (!js.ok) {
+    console.error("[TG ERROR]", res.status, js);
+    throw new Error(js.description || `telegram send failed (${res.status})`);
+  }
+  return js;
 }
 
-function ruleText(){
-  return "Rule: v4-xau with p_up ∈ [70%,74%) AND 7d bucket avg ≥ 0 AND n ≥ 50. Entry window 1h; exit 24h.";
+async function getGoStates() {
+  // reads gostates collection directly (existing 24h state)
+  const rows = await mongoose.connection.collection("gostates").find({}).toArray();
+  const map = {};
+  rows.forEach(r => { map[r.coin] = r; });
+  return map;
 }
 
-// Webhook endpoint: /api/tg/:secret
-r.post("/:secret", async (req, res) => {
+async function getMicroSignals() {
+  // Call your own API so UI, Telegram, and stats stay consistent
+  const base = APP_BASE || "";
+  if (!base) {
+    // fallback: try relative (works when this route shares the same host)
+    const q = new URLSearchParams({
+      coins: MICRO_COINS.join(","),
+      p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip", bbk: MICRO_BBK,
+      tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
+    }).toString();
+    // Using relative path when same app serves API
+    const r = await httpFetch(`/api/combined/signal?${q}`, { cache: "no-store" });
+    const js = await r.json();
+    return js.signals || [];
+  } else {
+    const q = new URLSearchParams({
+      coins: MICRO_COINS.join(","),
+      p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip", bbk: MICRO_BBK,
+      tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
+    }).toString();
+    const r = await httpFetch(`${base}/api/combined/signal?${q}`, { cache: "no-store" });
+    const js = await r.json();
+    return js.signals || [];
+  }
+}
+
+function microLine(sig) {
+  if (!sig || !sig.available) return "• Micro: —";
+  if (sig.combined) {
+    return `• Micro: ⚡ BUY — TP +${(sig.tp*100).toFixed(2)}% • SL −${(sig.sl*100).toFixed(2)}% • max ${sig.max_hold_h}h\n  Entry until ${sig.entry_until_myt} • Exit by ${sig.exit_by_myt}`;
+  }
+  if (sig.v4 && !sig.dip) {
+    return "• Micro: 👀 Watch (v4 OK) — waiting flip-dip (±30m)";
+  }
+  return "• Micro: —";
+}
+
+function formatGoSnapshot(goMap, sigs) {
+  const m = {};
+  (sigs || []).forEach(s => { m[s.coin] = s; });
+  const coins = MICRO_COINS;
+  const lines = [];
+  lines.push(`⏱️ Snapshot ${mytNow()} MYT`, "");
+  for (const c of coins) {
+    const st = (goMap[c]?.state || "NO-GO").toUpperCase();
+    lines.push(`${c.toUpperCase()} — ${st === "GO" ? "🟢 GO" : "🔴 NO-GO"} [24h]`);
+    lines.push(microLine(m[c]));
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+function formatWhyAll(goMap, sigs) {
+  const m = {};
+  (sigs || []).forEach(s => { m[s.coin] = s; });
+  const coins = MICRO_COINS;
+  const out = [];
+  for (const c of coins) {
+    const st = (goMap[c]?.state || "NO-GO").toUpperCase();
+    const s = m[c];
+    const pu = s ? (s.p_up*100).toFixed(1) : null;
+    const bucket = (s && Number.isFinite(s.bucket7d)) ? `${s.bucket7d>=0?"+":""}${(s.bucket7d*100).toFixed(2)}%` : "—";
+    out.push(`${c.toUpperCase()} — ${st === "GO" ? "🟢 GO" : "🔴 NO-GO"} [24h]`);
+    out.push(`• v4: ${s ? `p_up ${pu}% • n=${s.n} • 7d ${bucket}` : "—"}`);
+    out.push(s ? (s.combined ? `• Micro: ⚡ BUY active` : (s.v4 ? `• Micro: 👀 Watch (v4 OK)` : `• Micro: —`)) : `• Micro: —`);
+    out.push("");
+  }
+  return out.join("\n").trim();
+}
+
+function formatWhyOne(coin, goMap, sig) {
+  const st = (goMap[coin]?.state || "NO-GO").toUpperCase();
+  const pu = sig ? (sig.p_up*100).toFixed(1) : null;
+  const bucket = (sig && Number.isFinite(sig.bucket7d)) ? `${sig.bucket7d>=0?"+":""}${(sig.bucket7d*100).toFixed(2)}%` : "—";
+  const microPreset = `p≥${MICRO_P}, n≥${MICRO_N}, bucket≥${MICRO_B}, dip=flip, window ±${MICRO_W}m, BB ${MICRO_BBK}σ`;
+  const lines = [];
+  lines.push(`${coin.toUpperCase()} — status`);
+  lines.push(`[24h] ${st}: classic rule (70–74% band)`);
+  lines.push(`Micro preset: ${microPreset}.`);
+  if (!sig) {
+    lines.push("• v4: —");
+    lines.push("• dip: —");
+    lines.push("• Micro: —");
+  } else {
+    lines.push(`• v4: ${sig.v4 ? "OK" : "OFF"} (p_up ${pu ?? "—"}%, n=${sig.n ?? "—"}, 7d ${bucket})`);
+    lines.push(`• dip: ${sig.dip ? "ON (flip)" : "OFF"}`);
+    if (sig.combined) {
+      lines.push(`• Micro: ⚡ BUY — TP +${(sig.tp*100).toFixed(2)}% • SL −${(sig.sl*100).toFixed(2)}% • max ${sig.max_hold_h}h`);
+      lines.push(`  Entry until ${sig.entry_until_myt} • Exit by ${sig.exit_by_myt}`);
+    } else if (sig.v4 && !sig.dip) {
+      lines.push(`• Micro: 👀 Watch (v4 OK) — awaiting flip-dip (±${MICRO_W}m)`);
+    } else {
+      lines.push(`• Micro: —`);
+    }
+  }
+  lines.push("Trade rule on BUY: TP +0.30% • SL −0.20% • max 2h.");
+  return lines.join("\n");
+}
+
+// ===== Telegram webhook route =====
+router.post("/", async (req, res) => {
   try {
-    if (!TOKEN || !CHAT_ID || !TG_SECRET) return res.sendStatus(200);
-    if (req.params.secret !== TG_SECRET) return res.sendStatus(404);
+    const update = req.body || {};
+    const msg = update.message || update.edited_message;
+    if (!msg || !msg.text) return res.sendStatus(200);
 
-const update = req.body;
-// handle message / edited_message uniformly
-const msg = update?.message || update?.edited_message || null;
-const chatId = String(msg?.chat?.id || "");
-// commands can be in text or caption; also allow /go@botname and case-insensitive
-const rawText = (msg?.text || msg?.caption || "").trim();
-const text = rawText.replace(/\s+$/,""); // normalize trailing spaces
+    const chatId = msg.chat?.id;
+    const textRaw = (msg.text || "").trim();
+    const first = textRaw.split(/\s+/)[0].toLowerCase();
+    const arg = textRaw.slice(first.length).trim();
 
-function isCmd(re, s = text){
-  // matches /go, /GO, /go@bot, /go btc, etc.
-  return re.test(s);
-}
+    // Optional whitelist
+    if (CHAT_WHITELIST.length && !CHAT_WHITELIST.includes(String(chatId))) {
+      await tgSend(chatId, "Sorry, this bot is restricted.");
+      return res.sendStatus(200);
+    }
 
+    if (first === "/start" || first === "/help") {
+      const help = [
+        "Hi! Commands:",
+        "• /go  — snapshot (24h + Micro line)",
+        "• /why — reasons for all coins",
+        "• /why btc|eth — reasons for one coin",
+        "• /why micro — explain the Micro preset",
+      ].join("\n");
+      await tgSend(chatId, help);
+      return res.sendStatus(200);
+    }
 
-    // (Optional simple allowlist: only reply to your CHAT_ID)
+    if (first === "/go") {
+      const [sigs, goMap] = await Promise.all([getMicroSignals(), getGoStates()]);
+      const out = formatGoSnapshot(goMap, sigs);
+      await tgSend(chatId, out);
+      return res.sendStatus(200);
+    }
 
- if (!text || isCmd(/^\/start/i)) {
-  await reply(chatId || CHAT_ID, "Hi! Send /go for BTC & ETH status or /help for commands.");
-  return res.sendStatus(200);
-}
+    if (first === "/why") {
+      if (!arg || arg === "all") {
+        const [sigs, goMap] = await Promise.all([getMicroSignals(), getGoStates()]);
+        const out = formatWhyAll(goMap, sigs);
+        await tgSend(chatId, out);
+        return res.sendStatus(200);
+      }
+      if (arg === "micro") {
+        const explain = [
+          "Micro-Combined (0.5–2h): v4-xau filter (p≥0.55, n≥50, bucket≥−0.001) AND dip “flip”",
+          "(RSI turns up after oversold or band-touch) within ±30m; Bollinger 1.5σ.",
+          "Exit: TP +0.30%, SL −0.20%, max 2h.",
+          "Standby (optional alert): v4 ON + 2 of 3 cues (RSI rising near oversold, near/touched band, small rejection)."
+        ].join("\n");
+        await tgSend(chatId, explain);
+        return res.sendStatus(200);
+      }
+      const coin = coinNorm(arg);
+      if (!MICRO_COINS.includes(coin)) {
+        await tgSend(chatId, "Please use /why btc or /why eth (or /why micro).");
+        return res.sendStatus(200);
+      }
+      const [sigs, goMap] = await Promise.all([getMicroSignals(), getGoStates()]);
+      const sig = (sigs || []).find(s => s.coin === coin);
+      const out = formatWhyOne(coin, goMap, sig);
+      await tgSend(chatId, out);
+      return res.sendStatus(200);
+    }
 
-if (isCmd(/^\/help/i)) {
-  await reply(chatId || CHAT_ID, helpText());
-  return res.sendStatus(200);
-}
-
-if (isCmd(/^\/why/i)) {
-  await reply(chatId || CHAT_ID, ruleText());
-  return res.sendStatus(200);
-}
-
-// /go or /go@bot or /go   <coin>
-if (isCmd(/^\/go(@[\w_]+)?\s*$/i)) {
-  const all = await computeAll();
-  const body = [formatOne(all.bitcoin), formatOne(all.ethereum)].join("\n\n");
-  await reply(chatId || CHAT_ID, body);
-  return res.sendStatus(200);
-}
-if (isCmd(/^\/go(@[\w_]+)?\s+btc(?:oin)?$/i)) {
-  const r1 = await computeOne("bitcoin");
-  await reply(chatId || CHAT_ID, formatOne(r1));
-  return res.sendStatus(200);
-}
-if (isCmd(/^\/go(@[\w_]+)?\s+eth(?:ereum)?$/i)) {
-  const r2 = await computeOne("ethereum");
-  await reply(chatId || CHAT_ID, formatOne(r2));
-  return res.sendStatus(200);
-}
-
-// fallback
-await reply(chatId || CHAT_ID, "Unknown command. Try /go or /help");
-return res.sendStatus(200);
-
+    // Unknown command → keep your previous behavior (echo a short help)
+    await tgSend(chatId, "Unknown command. Try /go or /why.");
+    return res.sendStatus(200);
   } catch (e) {
-    // Always 200 to Telegram
-    res.sendStatus(200);
+    console.error("[tg]", e);
+    // Avoid Telegram retries by returning 200 even on internal error
+    try {
+      const chatId = req.body?.message?.chat?.id || req.body?.edited_message?.chat?.id;
+      if (chatId) await tgSend(chatId, "Oops, temporary error. Try again in a minute.");
+    } catch {}
+    return res.sendStatus(200);
   }
 });
 
-export default r;
+// Simple health-check
+router.get("/ping", (req, res) => res.send("ok"));
+
+export default router;
