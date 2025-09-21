@@ -104,6 +104,26 @@
     <p>You can toggle chips using the checkboxes above; state persists in <code>localStorage</code>.</p>
   </div>
 </details>
+  
+  <details class="muted" style="margin:12px 0; color:#9ca3af">
+  <summary>Notes: Micro-Combined (v4-xau ∧ RSI/Bollinger)</summary>
+  <div style="margin-top:6px; font-size:12px; line-height:1.5">
+    <p><b>What you’ll see under each coin</b></p>
+    <ul style="margin:6px 0 10px 18px">
+      <li><b>Conf</b> — confidence hint from v4-xau (p_up • n • 7d bucket). Colors: blue=OK, amber=borderline, red=weak.</li>
+      <li><b>Watch (v4 OK)</b> — v4 gate is ON (p_up ≥ 0.55, n ≥ 50, bucket ≥ −0.10bp here), but dip trigger not yet detected. We’re waiting for a flip-dip.</li>
+      <li><b>⚡ BUY (Micro)</b> — <u>both</u> v4 gate and dip trigger are ON within the entry window. The chip shows exits: <b>TP +0.30%</b> • <b>SL −0.20%</b> • <b>max hold 2h</b>.</li>
+      <li><span style="opacity:.85">dbg v4:true/false dip:true/false</span> — temporary debug line so you can verify the live state (remove by setting <code>DEBUG=false</code> in <code>combined-signal.js</code>).</li>
+    </ul>
+
+    <p><b>Current preset</b> (can be tuned later): p_up ≥ <b>0.55</b>, n ≥ <b>50</b>, bucket ≥ <b>−0.001</b>; dip = <b>flip</b> (RSI turning up) within ±<b>30m</b>, Bollinger <b>1.5σ</b>. Returns evaluated on 0.5h/1h/2h horizons.</p>
+
+    <p><b>Why you may see Watch on ETH but not BTC:</b> v4 varies by coin/time. If a coin’s p_up is below the threshold (e.g., BTC ~51–52%), it won’t show Watch/Buy until v4 recovers. BUY only appears when a valid dip happens during the entry window <i>and</i> v4 stays ON.</p>
+
+    <p style="margin-top:10px"><b>Trading rule (micro)</b>: Enter on <b>⚡ BUY (Micro)</b> before “Entry until …” expires. Exit on <b>TP +0.30%</b>, <b>SL −0.20%</b>, or <b>max 2h</b> — whichever comes first. (Optional: once unrealized &gt; +0.20%, trail by 0.15%.)</p>
+  </div>
+</details>
+
 
 </body>
 </html>
