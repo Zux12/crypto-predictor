@@ -106,6 +106,29 @@ router.get("/signal", async (req, res) => {
 
       const combined = dip && v4;
 
+      // --- Standby heuristic (v4 must be true; need any 2 of 3 cues) ---
+const rsi0    = ind.rsi[i0];
+const rsiPrev = ind.rsi[i0 - 1] ?? rsi0;
+const price0  = ind.price[i0];
+const lo0     = ind.bbLo[i0];
+
+// cue 1: RSI near threshold and rising (ΔRSI over ~1 bar)
+const nearRSI    = Number.isFinite(rsi0) && (rsi0 <= (rsiTh + 4)) && ((rsi0 - rsiPrev) >= 0.8);
+
+// cue 2: near/touched lower band (~0.15% tolerance)
+const nearBand   = Number.isFinite(lo0) && (
+  price0 <= lo0 ||
+  ((price0 - lo0) / Math.max(price0, 1)) <= 0.0015   // ≈ 0.15%
+);
+
+// cue 3: soft bounce (RSI uptick and price above band)
+const softBounce = ((rsi0 - rsiPrev) >= 0.4) && Number.isFinite(lo0) && (price0 > lo0);
+
+// final flag
+const standby = v4 && ((nearRSI ? 1 : 0) + (nearBand ? 1 : 0) + (softBounce ? 1 : 0) >= 2);
+
+     
+
       const entryUntil = myt(new Date((d.pred_ts ?? d.ts).getTime() + wMin*MIN));
       const exitBy     = myt(new Date((d.pred_ts ?? d.ts).getTime() + holdH*HOUR));
 
@@ -114,6 +137,7 @@ router.get("/signal", async (req, res) => {
         pred_ts: d.pred_ts ?? d.ts,
         p_up: d.p_up, n: d.n, bucket7d: d.bucket7d,
         dip, v4, combined,
+        standby,                              // <— added
         entry_until_myt: entryUntil,
         exit_by_myt: exitBy,
         tp, sl, max_hold_h: holdH
