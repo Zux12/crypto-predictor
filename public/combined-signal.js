@@ -1,3 +1,23 @@
+// ===== build marker (so you can SEE the new file is live) =====
+const BUILD_TAG = "cs-20250921-1555";  // change this string each deploy to verify
+console.log("[combined-signal] loaded", BUILD_TAG);
+
+(function showBuildBadge() {
+  // Append a small badge into the topbar
+  const top = document.querySelector(".topbar");
+  if (!top) return;
+  let el = document.getElementById("build-badge");
+  if (!el) {
+    el = document.createElement("span");
+    el.id = "build-badge";
+    el.className = "badge";
+    top.appendChild(el);
+  }
+  el.textContent = `UI ${BUILD_TAG} ✓`;
+})();
+
+
+
 // Lightweight fetch + render; no loops, no DOM churn
 (() => {
   const QS = (s,r=document)=>r.querySelector(s);
