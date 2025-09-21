@@ -4,11 +4,14 @@
   const idMap = { bitcoin: "btc", ethereum: "eth" };
 
   // Combined v1 preset (edit if you want to tighten later)
-  const PRESET = {
-    coins: "bitcoin,ethereum",
-    p: 0.55, b: 0, w: 30, rsi: 35, mode: "flip", bbk: 1.5,
-    tp: 0.003, sl: 0.002, hold: 2
-  };
+const PRESET = {
+  coins: "bitcoin,ethereum",
+  p: 0.55,        // keep 0.55 so today’s ETH can pass v4
+  b: -0.001,      // allow slightly negative bucket (ETH is -0.025%)
+  w: 30, rsi: 35, mode: "flip", bbk: 1.5,
+  tp: 0.003, sl: 0.002, hold: 2
+};
+
 
   function chip(text, cls="ok", title=""){
     const el = document.createElement("div");
