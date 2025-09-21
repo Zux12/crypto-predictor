@@ -52,12 +52,15 @@ async function fetchMicroSignalsSafe() {
     const js  = await res.json().catch(() => ({}));
     const map = {};
     (js.signals || []).forEach(s => map[s.coin] = s);
-    return map;   // { bitcoin: {...}, ethereum: {...} }
+    return map;                        // { bitcoin: {...}, ethereum: {...} }
   } catch (e) {
     console.error("[micro-snapshot] fetch failed:", e?.message || e);
-    return {};   // never crash the snapshot
+    return {};                         // never crash the snapshot
   }
 }
+
+// If other code calls fetchMicroSignals(), keep a compatible alias:
+const fetchMicroSignals = fetchMicroSignalsSafe;
 
 function fmtMicroLine(sig) {
   if (!sig || !sig.available) return "• Micro: —";
