@@ -70,7 +70,39 @@ router.get("/summary", async (req, res) => {
       const t0 = toMs(d.pred_ts ?? d.ts);
       const i0 = idxAtOrBefore(ind.ts, t0); if(i0<0) continue;
       const p0 = ind.price[i0];
-      const dip = (ind.rsi[i0] < 30) && (p0 <= ind.bbLo[i0]);
+
+
+// before:
+// const dip = (ind.rsi[i0] < 30) && (p0 <= ind.bbLo[i0]);
+
+// after (±15m window):
+function dipInWindow(ind, i0) {
+  const W = 15 * 60 * 1000; // 15 minutes in ms
+  const t0 = ind.ts[i0];
+  // scan nearby indices while within window
+  let i = i0;
+  // backward
+  while (i >= 0 && Math.abs(ind.ts[i] - t0) <= W) {
+    if (ind.rsi[i] < 30 && ind.price[i] <= ind.bbLo[i]) return true;
+    i--;
+  }
+  // forward
+  i = i0;
+  while (i < ind.ts.length && Math.abs(ind.ts[i] - t0) <= W) {
+    if (ind.rsi[i] < 30 && ind.price[i] <= ind.bbLo[i]) return true;
+    i++;
+  }
+  return false;
+}
+
+const dip = dipInWindow(ind, i0);
+
+
+
+
+      
+
+      
       const v4  = (Number(d.p_up) >= thP) && (Number(d.n) >= thN) && (Number(d.bucket7d) >= thB);
 
       const rets = {};
