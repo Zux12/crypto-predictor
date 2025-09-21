@@ -28,6 +28,57 @@ const HEARTBEATS     = String(process.env.HEARTBEATS ?? "on").toLowerCase() === 
 const HEARTBEAT_MODE = String(process.env.HEARTBEAT_MODE ?? "tenmin").toLowerCase(); // 'tenmin' | 'hourly'
 const QUIET_HOURS    = process.env.QUIET_HOURS ?? "";
 
+// --- Micro preset for snapshot line ---
+const APP_BASE = process.env.APP_BASE_URL || "";     // MUST be set in Heroku
+const MICRO_P   = process.env.MICRO_P   || "0.55";
+const MICRO_B   = process.env.MICRO_B   || "-0.001";
+const MICRO_W   = process.env.MICRO_W   || "30";
+const MICRO_RSI = process.env.MICRO_RSI || "35";
+const MICRO_BBK = process.env.MICRO_BBK || "1.5";
+const MICRO_TP  = process.env.MICRO_TP  || "0.003";
+const MICRO_SL  = process.env.MICRO_SL  || "0.002";
+const MICRO_HOLD= process.env.MICRO_HOLD|| "2";
+
+async function fetchMicroSignals() {
+  const q = new URLSearchParams({
+    coins: "bitcoin,ethereum",
+    p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip",
+    bbk: MICRO_BBK, tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
+  }).toString();
+  const fetchFn = globalThis.fetch ?? (await import("node-fetch")).default;
+  // IMPORTANT: use absolute APP_BASE; in a job process there is no window origin
+  const url = `${APP_BASE}/api/combined/signal?${q}`;
+  const res = await fetchFn(url, { cache: "no-store" });
+  const js = await res.json().catch(() => ({}));
+  const map = {};
+  (js.signals || []).forEach(s => map[s.coin] = s);
+  return map;
+}
+
+function fmtMicroLine(sig) {
+  if (!sig || !sig.available) return "• Micro: —";
+  if (sig.combined)
+    return `• Micro: ⚡ BUY — TP +${(sig.tp*100).toFixed(2)}% • SL −${(sig.sl*100).toFixed(2)}% • max ${sig.max_hold_h}h\n  Entry until ${sig.entry_until_myt} • Exit by ${sig.exit_by_myt}`;
+  // NEW: show Standby if the API provides it
+  if (sig.standby && !sig.dip) return "• Micro: 🟡 Standby (near flip) — watching ±30m";
+  if (sig.v4 && !sig.dip)      return "• Micro: 👀 Watch (v4 OK) — waiting flip-dip (±30m)";
+  return "• Micro: —";
+}
+
+// ... later, when building your 10-min snapshot message:
+const microMap = await fetchMicroSignals();
+for (const coin of COINS) {
+  // ...your existing 24h text build for this coin...
+  const sig = microMap[coin];
+  msg += `\n${fmtMicroLine(sig)}\n`;   // add one Micro line per coin
+}
+
+
+
+
+
+
+
 // ===== Helpers =====
 function mytDate(d) { const t = new Date(d.getTime() + 8*60*60*1000); return t.toISOString().slice(0,16).replace("T"," "); }
 function inQuietHours(nowUtc, spec) {
