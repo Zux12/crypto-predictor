@@ -2,8 +2,9 @@
 import express from "express";
 import mongoose from "mongoose";
 
-// route-local JSON body parser so we don't change global middleware
 const router = express.Router();
+
+// Route-local JSON parser so we don't change global middleware
 router.use(express.json({ limit: "1mb" }));
 
 // ==== ENV ====
@@ -28,30 +29,18 @@ async function httpFetch(url, opts) {
 }
 async function tgSend(chatId, text) {
   if (!TOKEN) return;
-  await httpFetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true })
-  }).catch(e => console.error("[TG SEND]", e?.message || e));
+  try {
+    await httpFetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true })
+    });
+  } catch(e){ console.error("[TG SEND]", e?.message || e); }
 }
-function cmdBase(text="") {
-  const first = (text.trim().split(/\s+/)[0] || "").toLowerCase();
-  return first.split("@")[0]; // handle /go@YourBot
-}
-function argTail(text="") {
-  const first = text.trim().split(/\s+/)[0] || "";
-  return text.trim().slice(first.length).trim();
-}
-function coinNorm(s="") {
-  s = s.toLowerCase().trim();
-  if (s === "btc") return "bitcoin";
-  if (s === "eth") return "ethereum";
-  return s;
-}
-function mytNow() {
-  const z = new Date(Date.now()+8*3600*1000);
-  return z.toISOString().slice(11,16);
-}
+function cmdBase(text="") { const f=(text.trim().split(/\s+/)[0]||"").toLowerCase(); return f.split("@")[0]; }
+function argTail(text=""){ const f=(text.trim().split(/\s+/)[0]||""); return text.trim().slice(f.length).trim(); }
+function coinNorm(s=""){ s=s.toLowerCase().trim(); if(s==="btc")return"bitcoin"; if(s==="eth")return"ethereum"; return s; }
+function mytNow(){ const z=new Date(Date.now()+8*3600*1000); return z.toISOString().slice(11,16); }
 
 // classic 24h state (existing collection)
 async function getGoStates() {
@@ -149,11 +138,13 @@ router.post("/", async (req, res, next) => {
     const base = cmdBase(msg.text);
     const arg  = argTail(msg.text);
 
+    // Debug trace so you can see the webhook in Heroku logs
+    console.log("[tg_micro_addon] cmd:", base, "arg:", arg);
+
     if (base !== "/go" && base !== "/why") {
       return next(); // let your original tg.js handle everything else
     }
 
-    // respond to /go and /why here (non-blocking for others)
     if (base === "/go") {
       const [sigs, goMap] = await Promise.all([getMicroSignals(req), getGoStates()]);
       await tgSend(chatId, formatGoSnapshot(goMap, sigs));
@@ -162,7 +153,6 @@ router.post("/", async (req, res, next) => {
 
     if (base === "/why") {
       const [sigs, goMap] = await Promise.all([getMicroSignals(req), getGoStates()]);
-
       const coin = coinNorm(arg);
       if (!coin) {
         await tgSend(chatId, formatWhyAll(goMap, sigs));
@@ -190,9 +180,12 @@ router.post("/", async (req, res, next) => {
     return next();
   } catch (e) {
     console.error("[tg_micro_addon]", e);
-    // still pass-through to keep your bot responsive
-    return next();
+    return next(); // fall through so your original tg.js can still reply
   }
 });
+
+// Health checks so curl works
+router.get("/ping", (req, res) => res.send("ok"));
+router.get("/", (req, res) => res.send("ok"));
 
 export default router;
