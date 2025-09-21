@@ -1,21 +1,20 @@
-// routes/tg.js  (ESM)
+// routes/tg.js  — safe, self-contained Telegram webhook (ESM)
 import express from "express";
 import mongoose from "mongoose";
 
-// Use global fetch if available; otherwise lazy import node-fetch
-async function httpFetch(url, opts) {
-  const f = globalThis.fetch ?? (await import("node-fetch")).default;
-  return f(url, opts);
-}
-
+// Route-local JSON parser so we don't change global middleware
 const router = express.Router();
+router.use(express.json({ limit: "1mb" }));
 
-// ===== ENV =====
-const TOKEN       = process.env.TELEGRAM_BOT_TOKEN;
-const APP_BASE    = process.env.APP_BASE_URL || ""; // e.g. https://crypto-predictor25-…herokuapp.com
-const CHAT_WHITELIST = (process.env.TG_CHAT_WHITELIST || "").split(",").map(s => s.trim()).filter(Boolean);
+// ==== ENV ====
+const TOKEN    = process.env.TELEGRAM_BOT_TOKEN;
+const APP_BASE = process.env.APP_BASE_URL || ""; // e.g. https://crypto-...herokuapp.com
 
-// Micro preset (same as UI preset; adjust via Heroku config vars)
+// Optional chat whitelist: "12345,67890"
+const CHAT_WHITELIST = (process.env.TG_CHAT_WHITELIST || "")
+  .split(",").map(s => s.trim()).filter(Boolean);
+
+// Micro preset (same as UI; tune via Heroku config vars)
 const MICRO_COINS = (process.env.MICRO_COINS || "bitcoin,ethereum").split(",").map(s => s.trim());
 const MICRO_P     = process.env.MICRO_P   ?? "0.55";
 const MICRO_N     = process.env.MICRO_N   ?? "50";
@@ -27,65 +26,62 @@ const MICRO_TP    = process.env.MICRO_TP  ?? "0.003";
 const MICRO_SL    = process.env.MICRO_SL  ?? "0.002";
 const MICRO_HOLD  = process.env.MICRO_HOLD?? "2";
 
-// ===== helpers =====
-function mytNow() {
-  const t = new Date(Date.now() + 8 * 3600 * 1000);
-  return t.toISOString().slice(11, 16); // "HH:MM"
+// ==== small helpers ====
+async function httpFetch(url, opts) {
+  const f = globalThis.fetch ?? (await import("node-fetch")).default;
+  return f(url, opts);
 }
-function coinNorm(s="") {
-  s = s.toLowerCase();
-  if (s === "btc") return "bitcoin";
-  if (s === "eth") return "ethereum";
-  return s;
-}
-
 async function tgSend(chatId, text) {
   if (!TOKEN) throw new Error("Missing TELEGRAM_BOT_TOKEN");
-  const res = await httpFetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+  const r = await httpFetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true })
   });
-  const js = await res.json().catch(() => ({}));
+  const js = await r.json().catch(() => ({}));
   if (!js.ok) {
-    console.error("[TG ERROR]", res.status, js);
-    throw new Error(js.description || `telegram send failed (${res.status})`);
+    console.error("[TG ERROR]", r.status, js);
+    throw new Error(js.description || `telegram send failed (${r.status})`);
   }
   return js;
 }
-
-async function getGoStates() {
-  // reads gostates collection directly (existing 24h state)
-  const rows = await mongoose.connection.collection("gostates").find({}).toArray();
-  const map = {};
-  rows.forEach(r => { map[r.coin] = r; });
-  return map;
+function mytNow() {
+  const z = new Date(Date.now() + 8 * 3600 * 1000);
+  return z.toISOString().slice(11, 16);
+}
+function coinNorm(s = "") {
+  s = s.toLowerCase().trim();
+  if (!s) return "";
+  const b = s.split("@")[0];               // handle /go@YourBot style
+  if (b === "btc") return "bitcoin";
+  if (b === "eth") return "ethereum";
+  return b;
+}
+function cmdBase(text = "") {
+  const t = text.trim().split(/\s+/)[0] || "";
+  const base = t.split("@")[0].toLowerCase();
+  return base; // e.g. "/go", "/why"
 }
 
-async function getMicroSignals() {
-  // Call your own API so UI, Telegram, and stats stay consistent
-  const base = APP_BASE || "";
-  if (!base) {
-    // fallback: try relative (works when this route shares the same host)
-    const q = new URLSearchParams({
-      coins: MICRO_COINS.join(","),
-      p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip", bbk: MICRO_BBK,
-      tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
-    }).toString();
-    // Using relative path when same app serves API
-    const r = await httpFetch(`/api/combined/signal?${q}`, { cache: "no-store" });
-    const js = await r.json();
-    return js.signals || [];
-  } else {
-    const q = new URLSearchParams({
-      coins: MICRO_COINS.join(","),
-      p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip", bbk: MICRO_BBK,
-      tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
-    }).toString();
-    const r = await httpFetch(`${base}/api/combined/signal?${q}`, { cache: "no-store" });
-    const js = await r.json();
-    return js.signals || [];
-  }
+// 24h GO/NO-GO (reads gostates)
+async function getGoStates() {
+  const rows = await mongoose.connection.collection("gostates").find({}).toArray();
+  const m = {}; rows.forEach(r => { m[r.coin] = r; });
+  return m;
+}
+
+// Micro signals from your own API (keeps logic in one place)
+async function getMicroSignals(req) {
+  // derive base if APP_BASE_URL not set
+  const base = APP_BASE || `${req.protocol}://${req.get("host")}`;
+  const q = new URLSearchParams({
+    coins: MICRO_COINS.join(","),
+    p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip", bbk: MICRO_BBK,
+    tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
+  }).toString();
+  const r = await httpFetch(`${base}/api/combined/signal?${q}`, { cache: "no-store" });
+  const js = await r.json();
+  return js.signals || [];
 }
 
 function microLine(sig) {
@@ -93,19 +89,15 @@ function microLine(sig) {
   if (sig.combined) {
     return `• Micro: ⚡ BUY — TP +${(sig.tp*100).toFixed(2)}% • SL −${(sig.sl*100).toFixed(2)}% • max ${sig.max_hold_h}h\n  Entry until ${sig.entry_until_myt} • Exit by ${sig.exit_by_myt}`;
   }
-  if (sig.v4 && !sig.dip) {
-    return "• Micro: 👀 Watch (v4 OK) — waiting flip-dip (±30m)";
-  }
+  if (sig.v4 && !sig.dip) return "• Micro: 👀 Watch (v4 OK) — waiting flip-dip (±30m)";
   return "• Micro: —";
 }
 
 function formatGoSnapshot(goMap, sigs) {
-  const m = {};
-  (sigs || []).forEach(s => { m[s.coin] = s; });
-  const coins = MICRO_COINS;
+  const m = {}; (sigs || []).forEach(s => { m[s.coin] = s; });
   const lines = [];
   lines.push(`⏱️ Snapshot ${mytNow()} MYT`, "");
-  for (const c of coins) {
+  for (const c of MICRO_COINS) {
     const st = (goMap[c]?.state || "NO-GO").toUpperCase();
     lines.push(`${c.toUpperCase()} — ${st === "GO" ? "🟢 GO" : "🔴 NO-GO"} [24h]`);
     lines.push(microLine(m[c]));
@@ -115,17 +107,15 @@ function formatGoSnapshot(goMap, sigs) {
 }
 
 function formatWhyAll(goMap, sigs) {
-  const m = {};
-  (sigs || []).forEach(s => { m[s.coin] = s; });
-  const coins = MICRO_COINS;
+  const m = {}; (sigs || []).forEach(s => { m[s.coin] = s; });
   const out = [];
-  for (const c of coins) {
+  for (const c of MICRO_COINS) {
     const st = (goMap[c]?.state || "NO-GO").toUpperCase();
     const s = m[c];
     const pu = s ? (s.p_up*100).toFixed(1) : null;
-    const bucket = (s && Number.isFinite(s.bucket7d)) ? `${s.bucket7d>=0?"+":""}${(s.bucket7d*100).toFixed(2)}%` : "—";
+    const b  = (s && Number.isFinite(s.bucket7d)) ? `${s.bucket7d>=0?"+":""}${(s.bucket7d*100).toFixed(2)}%` : "—";
     out.push(`${c.toUpperCase()} — ${st === "GO" ? "🟢 GO" : "🔴 NO-GO"} [24h]`);
-    out.push(`• v4: ${s ? `p_up ${pu}% • n=${s.n} • 7d ${bucket}` : "—"}`);
+    out.push(`• v4: ${s ? `p_up ${pu}% • n=${s.n} • 7d ${b}` : "—"}`);
     out.push(s ? (s.combined ? `• Micro: ⚡ BUY active` : (s.v4 ? `• Micro: 👀 Watch (v4 OK)` : `• Micro: —`)) : `• Micro: —`);
     out.push("");
   }
@@ -135,43 +125,41 @@ function formatWhyAll(goMap, sigs) {
 function formatWhyOne(coin, goMap, sig) {
   const st = (goMap[coin]?.state || "NO-GO").toUpperCase();
   const pu = sig ? (sig.p_up*100).toFixed(1) : null;
-  const bucket = (sig && Number.isFinite(sig.bucket7d)) ? `${sig.bucket7d>=0?"+":""}${(sig.bucket7d*100).toFixed(2)}%` : "—";
-  const microPreset = `p≥${MICRO_P}, n≥${MICRO_N}, bucket≥${MICRO_B}, dip=flip, window ±${MICRO_W}m, BB ${MICRO_BBK}σ`;
-  const lines = [];
-  lines.push(`${coin.toUpperCase()} — status`);
-  lines.push(`[24h] ${st}: classic rule (70–74% band)`);
-  lines.push(`Micro preset: ${microPreset}.`);
+  const b  = (sig && Number.isFinite(sig.bucket7d)) ? `${sig.bucket7d>=0?"+":""}${(sig.bucket7d*100).toFixed(2)}%` : "—";
+  const preset = `p≥${MICRO_P}, n≥${MICRO_N}, bucket≥${MICRO_B}, dip=flip, window ±${MICRO_W}m, BB ${MICRO_BBK}σ`;
+  const L = [];
+  L.push(`${coin.toUpperCase()} — status`);
+  L.push(`[24h] ${st}: classic rule (70–74% band)`);
+  L.push(`Micro preset: ${preset}.`);
   if (!sig) {
-    lines.push("• v4: —");
-    lines.push("• dip: —");
-    lines.push("• Micro: —");
+    L.push("• v4: —"); L.push("• dip: —"); L.push("• Micro: —");
   } else {
-    lines.push(`• v4: ${sig.v4 ? "OK" : "OFF"} (p_up ${pu ?? "—"}%, n=${sig.n ?? "—"}, 7d ${bucket})`);
-    lines.push(`• dip: ${sig.dip ? "ON (flip)" : "OFF"}`);
+    L.push(`• v4: ${sig.v4 ? "OK" : "OFF"} (p_up ${pu ?? "—"}%, n=${sig.n ?? "—"}, 7d ${b})`);
+    L.push(`• dip: ${sig.dip ? "ON (flip)" : "OFF"}`);
     if (sig.combined) {
-      lines.push(`• Micro: ⚡ BUY — TP +${(sig.tp*100).toFixed(2)}% • SL −${(sig.sl*100).toFixed(2)}% • max ${sig.max_hold_h}h`);
-      lines.push(`  Entry until ${sig.entry_until_myt} • Exit by ${sig.exit_by_myt}`);
+      L.push(`• Micro: ⚡ BUY — TP +${(sig.tp*100).toFixed(2)}% • SL −${(sig.sl*100).toFixed(2)}% • max ${sig.max_hold_h}h`);
+      L.push(`  Entry until ${sig.entry_until_myt} • Exit by ${sig.exit_by_myt}`);
     } else if (sig.v4 && !sig.dip) {
-      lines.push(`• Micro: 👀 Watch (v4 OK) — awaiting flip-dip (±${MICRO_W}m)`);
+      L.push(`• Micro: 👀 Watch (v4 OK) — awaiting flip-dip (±${MICRO_W}m)`);
     } else {
-      lines.push(`• Micro: —`);
+      L.push(`• Micro: —`);
     }
   }
-  lines.push("Trade rule on BUY: TP +0.30% • SL −0.20% • max 2h.");
-  return lines.join("\n");
+  L.push("Trade rule on BUY: TP +0.30% • SL −0.20% • max 2h.");
+  return L.join("\n");
 }
 
-// ===== Telegram webhook route =====
+// ==== Telegram webhook ====
 router.post("/", async (req, res) => {
   try {
     const update = req.body || {};
     const msg = update.message || update.edited_message;
-    if (!msg || !msg.text) return res.sendStatus(200);
+    if (!msg || typeof msg.text !== "string") return res.sendStatus(200);
 
     const chatId = msg.chat?.id;
-    const textRaw = (msg.text || "").trim();
-    const first = textRaw.split(/\s+/)[0].toLowerCase();
-    const arg = textRaw.slice(first.length).trim();
+    const text = msg.text.trim();
+    const base = cmdBase(text);                // handles /go and /go@YourBot
+    const arg  = text.slice((text.split(/\s+/)[0] || "").length).trim();
 
     // Optional whitelist
     if (CHAT_WHITELIST.length && !CHAT_WHITELIST.includes(String(chatId))) {
@@ -179,7 +167,8 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    if (first === "/start" || first === "/help") {
+    // /start or /help
+    if (base === "/start" || base === "/help") {
       const help = [
         "Hi! Commands:",
         "• /go  — snapshot (24h + Micro line)",
@@ -191,48 +180,53 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    if (first === "/go") {
-      const [sigs, goMap] = await Promise.all([getMicroSignals(), getGoStates()]);
+    // /go (combined snapshot)
+    if (base === "/go") {
+      const [sigs, goMap] = await Promise.all([
+        getMicroSignals(req), getGoStates()
+      ]);
       const out = formatGoSnapshot(goMap, sigs);
       await tgSend(chatId, out);
       return res.sendStatus(200);
     }
 
-    if (first === "/why") {
-      if (!arg || arg === "all") {
-        const [sigs, goMap] = await Promise.all([getMicroSignals(), getGoStates()]);
-        const out = formatWhyAll(goMap, sigs);
-        await tgSend(chatId, out);
-        return res.sendStatus(200);
-      }
-      if (arg === "micro") {
+    // /why
+    if (base === "/why") {
+      const [sigs, goMap] = await Promise.all([
+        getMicroSignals(req), getGoStates()
+      ]);
+
+      // /why micro
+      if (arg.toLowerCase() === "micro") {
         const explain = [
           "Micro-Combined (0.5–2h): v4-xau filter (p≥0.55, n≥50, bucket≥−0.001) AND dip “flip”",
           "(RSI turns up after oversold or band-touch) within ±30m; Bollinger 1.5σ.",
           "Exit: TP +0.30%, SL −0.20%, max 2h.",
-          "Standby (optional alert): v4 ON + 2 of 3 cues (RSI rising near oversold, near/touched band, small rejection)."
+          "Standby (optional alert): v4 ON + proximity cues (RSI rising near oversold, near/touched band, small rejection)."
         ].join("\n");
         await tgSend(chatId, explain);
         return res.sendStatus(200);
       }
+
+      // /why btc | /why eth | /why (all)
       const coin = coinNorm(arg);
-      if (!MICRO_COINS.includes(coin)) {
-        await tgSend(chatId, "Please use /why btc or /why eth (or /why micro).");
+      if (!coin || !MICRO_COINS.includes(coin)) {
+        const out = formatWhyAll(goMap, sigs);
+        await tgSend(chatId, out);
         return res.sendStatus(200);
       }
-      const [sigs, goMap] = await Promise.all([getMicroSignals(), getGoStates()]);
       const sig = (sigs || []).find(s => s.coin === coin);
       const out = formatWhyOne(coin, goMap, sig);
       await tgSend(chatId, out);
       return res.sendStatus(200);
     }
 
-    // Unknown command → keep your previous behavior (echo a short help)
+    // Unknown → short help (keeps old behavior friendly)
     await tgSend(chatId, "Unknown command. Try /go or /why.");
     return res.sendStatus(200);
   } catch (e) {
     console.error("[tg]", e);
-    // Avoid Telegram retries by returning 200 even on internal error
+    // Prevent Telegram retry storms
     try {
       const chatId = req.body?.message?.chat?.id || req.body?.edited_message?.chat?.id;
       if (chatId) await tgSend(chatId, "Oops, temporary error. Try again in a minute.");
@@ -241,7 +235,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Simple health-check
+// Health-check
 router.get("/ping", (req, res) => res.send("ok"));
 
 export default router;
