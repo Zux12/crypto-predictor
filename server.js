@@ -6,6 +6,9 @@ import metricsCompareRoute from "./routes/metrics_compare.js";
 import goRoute from "./routes/go.js";
 import tgRoute from "./routes/tg.js";
 import combined from "./routes/combined.js";
+import combinedSignal from "./routes/combined_signal.js";
+
+
 
 
 
@@ -47,6 +50,7 @@ app.use("/api/metrics", metricsCompareRoute);
 app.use("/api/go", goRoute);
 app.use("/api/tg", express.json(), tgRoute);
 app.use("/api/combined", combined);
+app.use("/api/combined", combinedSignal);   // keep your existing /api/combined/summary too
 
 
 
