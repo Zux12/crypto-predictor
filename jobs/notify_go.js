@@ -39,29 +39,34 @@ const MICRO_TP  = process.env.MICRO_TP  || "0.003";
 const MICRO_SL  = process.env.MICRO_SL  || "0.002";
 const MICRO_HOLD= process.env.MICRO_HOLD|| "2";
 
-async function fetchMicroSignals() {
-  const q = new URLSearchParams({
-    coins: "bitcoin,ethereum",
-    p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip",
-    bbk: MICRO_BBK, tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
-  }).toString();
-  const fetchFn = globalThis.fetch ?? (await import("node-fetch")).default;
-  // IMPORTANT: use absolute APP_BASE; in a job process there is no window origin
-  const url = `${APP_BASE}/api/combined/signal?${q}`;
-  const res = await fetchFn(url, { cache: "no-store" });
-  const js = await res.json().catch(() => ({}));
-  const map = {};
-  (js.signals || []).forEach(s => map[s.coin] = s);
-  return map;
+async function fetchMicroSignalsSafe() {
+  try {
+    const q = new URLSearchParams({
+      coins: "bitcoin,ethereum",
+      p: MICRO_P, b: MICRO_B, w: MICRO_W, rsi: MICRO_RSI, mode: "flip",
+      bbk: MICRO_BBK, tp: MICRO_TP, sl: MICRO_SL, hold: MICRO_HOLD
+    }).toString();
+    const fetchFn = globalThis.fetch ?? (await import("node-fetch")).default;
+    const url = `${APP_BASE}/api/combined/signal?${q}`;
+    const res = await fetchFn(url, { cache: "no-store" });
+    const js  = await res.json().catch(() => ({}));
+    const map = {};
+    (js.signals || []).forEach(s => map[s.coin] = s);
+    return map;   // { bitcoin: {...}, ethereum: {...} }
+  } catch (e) {
+    console.error("[micro-snapshot] fetch failed:", e?.message || e);
+    return {};   // never crash the snapshot
+  }
 }
 
 function fmtMicroLine(sig) {
   if (!sig || !sig.available) return "• Micro: —";
   if (sig.combined)
     return `• Micro: ⚡ BUY — TP +${(sig.tp*100).toFixed(2)}% • SL −${(sig.sl*100).toFixed(2)}% • max ${sig.max_hold_h}h\n  Entry until ${sig.entry_until_myt} • Exit by ${sig.exit_by_myt}`;
-  // NEW: show Standby if the API provides it
-  if (sig.standby && !sig.dip) return "• Micro: 🟡 Standby (near flip) — watching ±30m";
-  if (sig.v4 && !sig.dip)      return "• Micro: 👀 Watch (v4 OK) — waiting flip-dip (±30m)";
+  if (sig.standby && !sig.dip)
+    return "• Micro: 🟡 Standby (near flip) — watching ±30m";
+  if (sig.v4 && !sig.dip)
+    return "• Micro: 👀 Watch (v4 OK) — waiting flip-dip (±30m)";
   return "• Micro: —";
 }
 
@@ -144,6 +149,7 @@ const GoState = mongoose.models.GoState || mongoose.model("GoState", new mongoos
   console.log("[MONGO] connected");
 
   const now = new Date();
+  const microMap = await fetchMicroSignalsSafe();
 
   for (const coin of COINS) {
     const pred = await latest(coin);
@@ -185,7 +191,11 @@ const GoState = mongoose.models.GoState || mongoose.model("GoState", new mongoos
         { upsert: true }
       );
     } else if (shouldSendHeartbeat(now)) {
-      const snapshot = `⏱️ Snapshot ${mytDate(now)} MYT\n${head}`;
+      const snapshot =
+        `⏱️ Snapshot ${mytDate(now)} MYT\n` +
+        head + "\n" +
+        fmtMicroLine(microMap[coin]) + "\n";  // <— add Micro line here
+      
       await tgSend(snapshot);
       await GoState.updateOne(
         { coin },
