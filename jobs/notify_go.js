@@ -6,6 +6,8 @@ import Label from "../models/Label.js";
 import { logInference } from "./inferenceLogger.js";
 
 
+
+
 // ===== Crash guards (keep process visible, but don’t hang) =====
 process.on("unhandledRejection", (e) => { console.error("[UNHANDLED]", e); process.exit(1); });
 process.on("uncaughtException",  (e) => { console.error("[UNCAUGHT]",  e); process.exit(1); });
@@ -188,21 +190,23 @@ function fmtMicroLine(sig) {
     
     
     // ——— Log a fresh inference so Micro API sees the same (live) p_up/n/bucket ———
+// Log a fresh inference so Micro API sees the same live numbers
 try {
   await logInference({
     ts: new Date(),
     pred_ts: pred.ts,
     coin,
     model: MODEL,
-    p_up: p,           // 0..1
-    n: b.n,            // sample count used in your reason
-    bucket7d: b.avg,   // decimal (e.g., 0.0046 for +0.46%)
-    decision: state,   // "GO" | "NO_GO"
-    reason             // same debug string used in the snapshot
+    p_up: p,
+    n: b.n,
+    bucket7d: b.avg,
+    decision: state,
+    reason
   });
 } catch (e) {
   console.error("[inference log] failed:", e?.message || e);
 }
+
 
 
     const head = `${coin.toUpperCase()}: ${state==="GO" ? "🟢 GO" : "🔴 NO-GO"} — ${reason}`;
