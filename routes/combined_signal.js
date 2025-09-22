@@ -1,23 +1,29 @@
- // ESM
+// routes/combined_signal.js — per-coin Micro signal (v4 gate + dip "flip") with standby and fallback
 import express from "express";
-import Inference from "../models/Inference.js";
+import mongoose from "mongoose";
 import Price from "../models/Price.js";
+import Inference from "../models/Inference.js";
 
 const router = express.Router();
 
 const HOUR = 3600_000, MIN = 60_000;
-const toMs = d => +new Date(d);
+const toMs = (d) => +new Date(d);
 
-// tiny helpers
-function idxAtOrBefore(ts, t){ let lo=0,hi=ts.length-1,a=-1; while(lo<=hi){const m=(lo+hi)>>1; if(ts[m]<=t){a=m; lo=m+1}else hi=m-1} return a; }
-function idxAtOrAfter (ts, t){ let lo=0,hi=ts.length-1,a=-1; while(lo<=hi){const m=(lo+hi)>>1; if(ts[m]>=t){a=m; hi=m-1}else lo=m+1} return a; }
-function myt(dt){ const z = new Date(dt.getTime() + 8*HOUR); return z.toISOString().slice(0,16).replace("T"," "); }
+function idxAtOrBefore(ts, t){ let lo=0,hi=ts.length-1,a=-1; while(lo<=hi){const m=(lo+hi)>>1; if(ts[m]<=t){a=m;lo=m+1}else hi=m-1} return a; }
+function idxAtOrAfter (ts, t){ let lo=0,hi=ts.length-1,a=-1; while(lo<=hi){const m=(lo+hi)>>1; if(ts[m]>=t){a=m;hi=m-1}else lo=m+1} return a; }
+function nearestInWindow(ts, target, tolMs){
+  let lo = target - tolMs, hi = target + tolMs;
+  let i = ts.findIndex(t=> t>=lo); if (i<0) return -1;
+  let best=-1, bestAbs=Infinity;
+  for (; i<ts.length && ts[i]<=hi; i++){ const a=Math.abs(ts[i]-target); if (a<bestAbs){best=i;bestAbs=a;} }
+  return best;
+}
 
-// RSI14 (Wilder) + Bollinger(mid 20, sigma k)
-function computeIndicators(prices, k=2.0){
-  const n = prices.length, rsi = new Array(n).fill(NaN), bbLo = new Array(n).fill(NaN);
+// RSI(14) Wilder + Bollinger(20, kσ)
+function computeIndicators(prices, k){
+  const n=prices.length, rsi=new Array(n).fill(NaN), bbLo=new Array(n).fill(NaN);
   if (!n) return { rsi, bbLo };
-  const delta = prices.map((v,i)=> i? v-prices[i-1] : 0);
+  const delta=prices.map((v,i)=> i? v-prices[i-1] : 0);
   let ru=0, rd=0, a=1/14;
   for (let i=0;i<n;i++){
     const up=Math.max(delta[i],0), dn=Math.max(-delta[i],0);
@@ -40,171 +46,131 @@ function computeIndicators(prices, k=2.0){
 
 router.get("/signal", async (req, res) => {
   try {
-    // Combined v1 defaults (the preset that cleared 70% in your tests)
+    // Query params (with defaults aligned to your preset)
     const coins = (req.query.coins ?? "bitcoin,ethereum").split(",").map(s=>s.trim());
-    const thP   = Number(req.query.p   ?? 0.55);     // v4 p_up
-    const thN   = Number(req.query.n   ?? 50);       // v4 n
-    const thB   = Number(req.query.b   ?? 0);        // v4 bucket7d
-    const wMin  = Number(req.query.w   ?? 30);       // dip window ±minutes
+    const thP   = Number(req.query.p   ?? 0.55);
+    const thN   = Number(req.query.n   ?? 50);
+    const thB   = Number(req.query.b   ?? -0.001);
+    const wMin  = Number(req.query.w   ?? 30);
     const rsiTh = Number(req.query.rsi ?? 35);
-    const mode  = String(req.query.mode ?? "flip").toLowerCase(); // flip|and|or
-    const bbk   = Number(req.query.bbk ?? 1.5);      // Bollinger sigma
-    const tp    = Number(req.query.tp  ?? 0.003);    // +0.30%
-    const sl    = Number(req.query.sl  ?? 0.002);    // -0.20%
-    const holdH = Number(req.query.hold ?? 2);       // max 2h
+    const mode  = String(req.query.mode ?? "flip").toLowerCase(); // flip|and|or (we use flip below)
+    const bbk   = Number(req.query.bbk ?? 1.5);
+    const tp    = Number(req.query.tp  ?? 0.003);
+    const sl    = Number(req.query.sl  ?? 0.002);
+    const holdH = Number(req.query.hold ?? 2);
 
-    // latest inferences per coin
-    const infs = await Inference.aggregate([
+    // Latest inference per coin
+    let infs = await Inference.aggregate([
       { $match: { coin: { $in: coins } } },
       { $sort: { ts: -1 } },
       { $group: { _id: "$coin", doc: { $first: "$$ROOT" } } }
     ]);
 
-   // ——— Fallback to latest Prediction when Inference missing or stale (>90m) ———
-let infsMap = new Map((infs || []).map(x => [x._id, x]));
-const STALE_MS = 90 * 60 * 1000;
-const nowMs = Date.now();
+    // Fallback to Prediction if missing/stale (>90m)
+    const STALE_MS = 90 * 60 * 1000;
+    const nowMs = Date.now();
+    const map = new Map((infs || []).map(x => [x._id, x]));
 
-for (const coin of coins) {
-  const had = infsMap.get(coin);
-  const isStale = !had || (nowMs - +new Date(had.doc?.pred_ts ?? had.doc?.ts ?? 0) > STALE_MS);
+    for (const coin of coins) {
+      const had = map.get(coin);
+      const isStale = !had || (nowMs - +new Date(had.doc?.pred_ts ?? had.doc?.ts ?? 0)) > STALE_MS;
 
-  if (!had || isStale) {
-    const pred = await mongoose.connection
-      .collection("predictions")
-      .find({ coin, model_ver: req.query.model || "v4-ai-logreg-xau" })
-      .sort({ ts: -1 }).limit(1).toArray();
-
-    if (pred[0]) {
-      // Synthesize a minimal "doc" that looks like an Inference row
-      infsMap.set(coin, {
-        _id: coin,
-        doc: {
-          coin,
-          pred_ts: pred[0].ts,
-          p_up: Number(pred[0].p_up ?? pred[0].prob_up ?? 0),
-          n: Number(pred[0].n ?? 0),
-          bucket7d: null,   // left null if not stored in predictions
-          reason: null
+      if (!had || isStale) {
+        const pred = await mongoose.connection.collection("predictions")
+          .find({ coin, model_ver: req.query.model || "v4-ai-logreg-xau" })
+          .sort({ ts: -1 }).limit(1).toArray();
+        if (pred[0]) {
+          map.set(coin, {
+            _id: coin,
+            doc: {
+              coin,
+              pred_ts: pred[0].ts,
+              p_up: Number(pred[0].p_up ?? pred[0].prob_up ?? 0),
+              n: Number(pred[0].n ?? 0),
+              bucket7d: null,
+              reason: null
+            }
+          });
         }
-      });
+      }
     }
-  }
-}
+    const infRows = Array.from(map.values());
+    if (!infRows.length) return res.json({ params:{coins,thP,thN,thB,wMin,rsiTh,mode,bbk,tp,sl,holdH}, signals: [] });
 
-// Replace infs array with our map values
-const infRows = Array.from(infsMap.values());
-
-
-    // grab price window around the latest pred_ts
-    const tMin = Math.min(...infs.map(x => toMs(x.doc.pred_ts ?? x.doc.ts)));
-    const tMax = Math.max(...infs.map(x => toMs(x.doc.pred_ts ?? x.doc.ts)));
-    const px = await Price.find({
+    // Price window covering all coins’ pred_ts
+    const minT = new Date(Math.min(...infRows.map(x => +new Date(x.doc.pred_ts ?? x.doc.ts))));
+    const maxT = new Date(Math.max(...infRows.map(x => +new Date(x.doc.pred_ts ?? x.doc.ts))));
+    const raw = await Price.find({
       coin: { $in: coins },
-      ts: { $gte: new Date(tMin - 12*HOUR), $lte: new Date(tMax + 12*HOUR) }
+      ts: { $gte: new Date(minT.getTime() - 12*HOUR), $lte: new Date(maxT.getTime() + 36*HOUR) }
     }).sort({ coin:1, ts:1 }).lean();
 
-    // group + indicators
+    // Group prices & indicators
     const G = {};
-    for (const r of px) { (G[r.coin] ||= { ts:[], price:[] }).ts.push(toMs(r.ts)); G[r.coin].price.push(Number(r.price)); }
+    for (const r of raw) { (G[r.coin] ||= { ts:[], price:[] }).ts.push(+new Date(r.ts)); G[r.coin].price.push(Number(r.price)); }
     const IND = {};
     for (const [c, d] of Object.entries(G)) IND[c] = { ...d, ...computeIndicators(d.price, bbk) };
 
+    // Evaluate per coin
     const out = [];
+    for (const { _id: coin, doc:d } of infRows) {
+      const ind = IND[coin];
+      if (!ind) { out.push({ coin, available:false }); continue; }
 
-     for (const { _id: coin, doc: d } of infRows) {
+      const t0 = +new Date(d.pred_ts ?? d.ts);
+      const i0 = idxAtOrBefore(ind.ts, t0);
+      if (i0 < 0) { out.push({ coin, available:false }); continue; }
 
-      const ind = IND[coin]; if (!ind) { out.push({ coin, available:false }); continue; }
-      const t0 = toMs(d.pred_ts ?? d.ts);
-      const i0 = idxAtOrBefore(ind.ts, t0); if (i0<0){ out.push({ coin, available:false }); continue; }
-
-      // dip detection in window
-      const center = ind.ts[i0], W = wMin * MIN;
-      let sawRSI=false, sawBand=false, sawFlip=false;
-      for (let j=i0; j>=0 && Math.abs(ind.ts[j]-center)<=W; j--){
-        const rsiJ=ind.rsi[j], pJ=ind.price[j], loJ=ind.bbLo[j], rsiPrev = (j>0? ind.rsi[j-1] : rsiJ);
-        sawRSI  ||= (rsiJ < rsiTh);
-        sawBand ||= (pJ <= loJ);
-        sawFlip ||= (rsiJ > rsiPrev) && ( (rsiPrev < rsiTh) || (pJ <= loJ) );
-      }
-      for (let j=i0+1; j<ind.ts.length && Math.abs(ind.ts[j]-center)<=W; j++){
-        const rsiJ=ind.rsi[j], pJ=ind.price[j], loJ=ind.bbLo[j], rsiPrev = ind.rsi[j-1] ?? rsiJ;
-        sawRSI  ||= (rsiJ < rsiTh);
-        sawBand ||= (pJ <= loJ);
-        sawFlip ||= (rsiJ > rsiPrev) && ( (rsiPrev < rsiTh) || (pJ <= loJ) );
-      }
-      const dip = mode==="flip" ? sawFlip : (mode==="or" ? (sawRSI || sawBand) : (sawRSI && sawBand));
+      // DIP: flip (RSI rising from oversold or at/below band) within window ±wMin
+      const center = ind.ts[i0], W = wMin*MIN;
+      let sawFlip=false;
+      const scan = (j) => {
+        const r=ind.rsi[j], p=ind.price[j], lo=ind.bbLo[j], rPrev = ind.rsi[j-1] ?? r;
+        if ((r > rPrev) && (rPrev < rsiTh || (Number.isFinite(lo) && p <= lo))) sawFlip = true;
+      };
+      for (let j=i0; j>=0 && Math.abs(ind.ts[j]-center)<=W; j--) scan(j);
+      for (let j=i0+1; j<ind.ts.length && Math.abs(ind.ts[j]-center)<=W; j++) scan(j);
+      const dip = sawFlip;
 
       // v4 gate (null-safe bucket)
-      const pOK  = Number(d.p_up)    >= thP;
-      const nOK  = Number(d.n)       >= thN;
+      const pOK  = Number(d.p_up) >= thP;
+      const nOK  = Number(d.n)    >= thN;
       const bVal = Number(d.bucket7d);
       const bOK  = Number.isFinite(bVal) ? (bVal >= thB) : (thB <= 0);
       const v4   = pOK && nOK && bOK;
 
-      const combined = dip && v4;
+      const combined = v4 && dip;
 
-      // ——— Standby heuristic: v4 must be true + any 2 of 3 proximity cues ———
-const rsi0    = ind.rsi[i0];
-const rsiPrev = ind.rsi[i0 - 1] ?? rsi0;
-const price0  = ind.price[i0];
-const lo0     = ind.bbLo[i0];
+      // Standby (v4 must be true; need 2/3 proximity cues)
+      const rsi0    = ind.rsi[i0];
+      const rsiPrev = ind.rsi[i0 - 1] ?? rsi0;
+      const price0  = ind.price[i0];
+      const lo0     = ind.bbLo[i0];
 
-// cue 1: RSI near threshold and rising
-const nearRSI    = Number.isFinite(rsi0) && (rsi0 <= (rsiTh + 4)) && ((rsi0 - rsiPrev) >= 0.8);
-// cue 2: near/touch lower band (~0.15% tolerance when not touching)
-const nearBand   = Number.isFinite(lo0) && (
-  price0 <= lo0 ||
-  ((price0 - lo0) / Math.max(price0, 1)) <= 0.0015
-);
-// cue 3: soft bounce (small RSI uptick and above band)
-const softBounce = ((rsi0 - rsiPrev) >= 0.4) && Number.isFinite(lo0) && (price0 > lo0);
+      const nearRSI    = Number.isFinite(rsi0) && (rsi0 <= (rsiTh + 4)) && ((rsi0 - rsiPrev) >= 0.8);
+      const nearBand   = Number.isFinite(lo0) && (price0 <= lo0 || ((price0 - lo0) / Math.max(price0,1)) <= 0.0015);
+      const softBounce = ((rsi0 - rsiPrev) >= 0.4) && Number.isFinite(lo0) && (price0 > lo0);
+      const standby    = v4 && ((nearRSI?1:0) + (nearBand?1:0) + (softBounce?1:0) >= 2);
 
-// final flag
-const standby = v4 && ((nearRSI ? 1 : 0) + (nearBand ? 1 : 0) + (softBounce ? 1 : 0) >= 2);
-
-
-      // --- Standby heuristic (v4 must be true; need any 2 of 3 cues) ---
-const rsi0    = ind.rsi[i0];
-const rsiPrev = ind.rsi[i0 - 1] ?? rsi0;
-const price0  = ind.price[i0];
-const lo0     = ind.bbLo[i0];
-
-// cue 1: RSI near threshold and rising (ΔRSI over ~1 bar)
-const nearRSI    = Number.isFinite(rsi0) && (rsi0 <= (rsiTh + 4)) && ((rsi0 - rsiPrev) >= 0.8);
-
-// cue 2: near/touched lower band (~0.15% tolerance)
-const nearBand   = Number.isFinite(lo0) && (
-  price0 <= lo0 ||
-  ((price0 - lo0) / Math.max(price0, 1)) <= 0.0015   // ≈ 0.15%
-);
-
-// cue 3: soft bounce (RSI uptick and price above band)
-const softBounce = ((rsi0 - rsiPrev) >= 0.4) && Number.isFinite(lo0) && (price0 > lo0);
-
-// final flag
-const standby = v4 && ((nearRSI ? 1 : 0) + (nearBand ? 1 : 0) + (softBounce ? 1 : 0) >= 2);
-
-     
-
-      const entryUntil = myt(new Date((d.pred_ts ?? d.ts).getTime() + wMin*MIN));
-      const exitBy     = myt(new Date((d.pred_ts ?? d.ts).getTime() + holdH*HOUR));
+      // Entry/exit hints in MYT
+      const entryUntil = new Date((d.pred_ts ?? d.ts)).getTime() + wMin*MIN;
+      const exitBy     = new Date((d.pred_ts ?? d.ts)).getTime() + holdH*HOUR;
+      const toMYT = (ms) => { const z = new Date(ms + 8*HOUR); return z.toISOString().slice(0,16).replace("T"," "); };
 
       out.push({
         coin, available:true,
         pred_ts: d.pred_ts ?? d.ts,
         p_up: d.p_up, n: d.n, bucket7d: d.bucket7d,
-        dip, v4, combined,
-        standby,                              // <— added
-        entry_until_myt: entryUntil,
-        exit_by_myt: exitBy,
+        dip, v4, combined, standby,
+        entry_until_myt: toMYT(entryUntil),
+        exit_by_myt: toMYT(exitBy),
         tp, sl, max_hold_h: holdH
       });
     }
 
     res.json({ params:{ coins, thP, thN, thB, wMin, rsiTh, mode, bbk, tp, sl, holdH }, signals: out });
   } catch (e) {
-    console.error(e);
+    console.error("[combined_signal]", e);
     res.status(500).json({ error: e.message });
   }
 });
