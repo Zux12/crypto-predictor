@@ -3,6 +3,8 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import Prediction from "../models/Prediction.js";
 import Label from "../models/Label.js";
+import { logInference } from "./inferenceLogger.js";
+
 
 // ===== Crash guards (keep process visible, but don’t hang) =====
 process.on("unhandledRejection", (e) => { console.error("[UNHANDLED]", e); process.exit(1); });
@@ -183,6 +185,25 @@ function fmtMicroLine(sig) {
     const exitBy     = mytDate(new Date(pred.ts.getTime() + 24 * 60 * 60 * 1000));
     const avgStr     = (b.avg == null) ? "—" : `${b.avg >= 0 ? "+" : ""}${(b.avg * 100).toFixed(2)}%`;
     const reason     = `p_up=${(p * 100).toFixed(1)}% • 7d(${bucketLabel()}) ${avgStr} (n=${b.n})`;
+    
+    
+    // ——— Log a fresh inference so Micro API sees the same (live) p_up/n/bucket ———
+try {
+  await logInference({
+    ts: new Date(),
+    pred_ts: pred.ts,
+    coin,
+    model: MODEL,
+    p_up: p,           // 0..1
+    n: b.n,            // sample count used in your reason
+    bucket7d: b.avg,   // decimal (e.g., 0.0046 for +0.46%)
+    decision: state,   // "GO" | "NO_GO"
+    reason             // same debug string used in the snapshot
+  });
+} catch (e) {
+  console.error("[inference log] failed:", e?.message || e);
+}
+
 
     const head = `${coin.toUpperCase()}: ${state==="GO" ? "🟢 GO" : "🔴 NO-GO"} — ${reason}`;
     const windowTxt  = state==="GO" ? `\nEntry until ${entryUntil} MYT\nExit by ${exitBy} MYT` : "";
