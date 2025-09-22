@@ -60,6 +60,42 @@ router.get("/signal", async (req, res) => {
       { $group: { _id: "$coin", doc: { $first: "$$ROOT" } } }
     ]);
 
+   // ——— Fallback to latest Prediction when Inference missing or stale (>90m) ———
+let infsMap = new Map((infs || []).map(x => [x._id, x]));
+const STALE_MS = 90 * 60 * 1000;
+const nowMs = Date.now();
+
+for (const coin of coins) {
+  const had = infsMap.get(coin);
+  const isStale = !had || (nowMs - +new Date(had.doc?.pred_ts ?? had.doc?.ts ?? 0) > STALE_MS);
+
+  if (!had || isStale) {
+    const pred = await mongoose.connection
+      .collection("predictions")
+      .find({ coin, model_ver: req.query.model || "v4-ai-logreg-xau" })
+      .sort({ ts: -1 }).limit(1).toArray();
+
+    if (pred[0]) {
+      // Synthesize a minimal "doc" that looks like an Inference row
+      infsMap.set(coin, {
+        _id: coin,
+        doc: {
+          coin,
+          pred_ts: pred[0].ts,
+          p_up: Number(pred[0].p_up ?? pred[0].prob_up ?? 0),
+          n: Number(pred[0].n ?? 0),
+          bucket7d: null,   // left null if not stored in predictions
+          reason: null
+        }
+      });
+    }
+  }
+}
+
+// Replace infs array with our map values
+const infRows = Array.from(infsMap.values());
+
+
     // grab price window around the latest pred_ts
     const tMin = Math.min(...infs.map(x => toMs(x.doc.pred_ts ?? x.doc.ts)));
     const tMax = Math.max(...infs.map(x => toMs(x.doc.pred_ts ?? x.doc.ts)));
@@ -75,7 +111,9 @@ router.get("/signal", async (req, res) => {
     for (const [c, d] of Object.entries(G)) IND[c] = { ...d, ...computeIndicators(d.price, bbk) };
 
     const out = [];
-    for (const {_id: coin, doc:d} of infs){
+
+     for (const { _id: coin, doc: d } of infRows) {
+
       const ind = IND[coin]; if (!ind) { out.push({ coin, available:false }); continue; }
       const t0 = toMs(d.pred_ts ?? d.ts);
       const i0 = idxAtOrBefore(ind.ts, t0); if (i0<0){ out.push({ coin, available:false }); continue; }
@@ -105,6 +143,26 @@ router.get("/signal", async (req, res) => {
       const v4   = pOK && nOK && bOK;
 
       const combined = dip && v4;
+
+      // ——— Standby heuristic: v4 must be true + any 2 of 3 proximity cues ———
+const rsi0    = ind.rsi[i0];
+const rsiPrev = ind.rsi[i0 - 1] ?? rsi0;
+const price0  = ind.price[i0];
+const lo0     = ind.bbLo[i0];
+
+// cue 1: RSI near threshold and rising
+const nearRSI    = Number.isFinite(rsi0) && (rsi0 <= (rsiTh + 4)) && ((rsi0 - rsiPrev) >= 0.8);
+// cue 2: near/touch lower band (~0.15% tolerance when not touching)
+const nearBand   = Number.isFinite(lo0) && (
+  price0 <= lo0 ||
+  ((price0 - lo0) / Math.max(price0, 1)) <= 0.0015
+);
+// cue 3: soft bounce (small RSI uptick and above band)
+const softBounce = ((rsi0 - rsiPrev) >= 0.4) && Number.isFinite(lo0) && (price0 > lo0);
+
+// final flag
+const standby = v4 && ((nearRSI ? 1 : 0) + (nearBand ? 1 : 0) + (softBounce ? 1 : 0) >= 2);
+
 
       // --- Standby heuristic (v4 must be true; need any 2 of 3 cues) ---
 const rsi0    = ind.rsi[i0];
