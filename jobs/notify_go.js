@@ -69,21 +69,41 @@ function shouldSendHeartbeat(nowUtc) {
 // ===== Telegram =====
 async function tgSend(text) {
   const fetchFn = globalThis.fetch ?? (await import("node-fetch")).default;
-  const url = `https://api.telegram.org/bot${TOKEN}/sendMessage`;
-  const body = { chat_id: CHAT_ID, text, disable_web_page_preview: true };
-  const res = await fetchFn(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!json.ok) {
-    console.error("[TG ERROR]", res.status, JSON.stringify(json));
-    throw new Error(json.description || `telegram send failed (${res.status})`);
+
+  // Multi-recipient support (comma-separated IDs)
+  const ids =
+    (process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+
+  if (ids.length === 0) {
+    console.error("[TG ERROR] No TELEGRAM_CHAT_IDS / TELEGRAM_CHAT_ID configured");
+    return;
   }
-  console.log("[TG OK] message_id", json.result?.message_id);
-  return json;
+
+  const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const bodyBase = { text, disable_web_page_preview: true };
+
+  for (const chatId of ids) {
+    try {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, ...bodyBase })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!json.ok) {
+        console.error("[TG ERROR]", chatId, res.status, JSON.stringify(json));
+      } else {
+        console.log("[TG OK]", chatId, "message_id", json.result?.message_id);
+      }
+    } catch (e) {
+      console.error("[TG SEND] failed for", chatId, e?.message || e);
+    }
+  }
 }
+
 
 // ===== Models used by this job =====
 const GoState = mongoose.models.GoState || mongoose.model("GoState", new mongoose.Schema({
